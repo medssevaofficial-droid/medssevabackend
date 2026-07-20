@@ -1,0 +1,577 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String          @id @default(uuid())
+  uhid                String?         @unique
+  name                String
+  email               String?         @unique
+  mobile              String          @unique
+  password            String?
+  role                Role            @default(USER)
+  avatarUrl           String?
+  healthScore         Int             @default(0)
+  createdAt           DateTime        @default(now())
+  addresses           Address[]
+  bookings            Booking[]
+  familyMembers       Family[]
+  paymentMethods      PaymentMethod[]
+  verifiedReports     Report[]        @relation("ReportVerifier")
+  paymentsReceived    Booking[]       @relation("PaymentReceiver")
+  assignedCollections Booking[]       @relation("AssignedExecutive")
+  prescriptions       Prescription[]
+  adminUser           AdminUser?
+  auditLogs           AuditLog[]
+  pathologyPartner    PathologyPartner?
+  conversations       Conversation[]
+}
+model City {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  icon      String   @default("city")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Address {
+  id        String  @id @default(uuid())
+  userId    String
+  type      String
+  line1     String
+  line2     String?
+  city      String
+  state     String
+  pincode   String
+  isDefault Boolean @default(false)
+  user      User    @relation(fields: [userId], references: [id])
+}
+
+model PaymentMethod {
+  id        String   @id @default(uuid())
+  userId    String
+  bank      String
+  last4     String
+  holder    String
+  expiry    String
+  type      String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Family {
+  id       String @id @default(uuid())
+  userId   String
+  name     String
+  relation String
+  age      Int
+  gender   String
+  user     User   @relation(fields: [userId], references: [id])
+}
+
+model TestCategory {
+  id           String  @id
+  name         String
+  iconName     String
+  iconUrl      String?
+  slug         String  @unique
+  testCount    String  @default("0+")
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+  tests        Test[]
+}
+
+model Test {
+  id              String          @id @default(uuid())
+  name            String
+  description     String
+  price           Float
+  discountedPrice Float
+  categoryId      String
+  reportTime      String
+  fastingRequired Boolean
+  homeCollection  Boolean         @default(true)
+  labVisit        Boolean         @default(true)
+  whyRequired     String?
+  preparation     String?
+  imageUrl        String?
+  badge           String?
+  isFeatured      Boolean         @default(false)
+  isPopular       Boolean         @default(false)
+  isTrending      Boolean         @default(false)
+  displayOrder    Int             @default(0)
+  rating          Float           @default(0)
+  reviewCount     Int             @default(0)
+  isActive        Boolean         @default(true)
+  bookings        BookingTest[]
+  packages        PackageTest[]
+  category        TestCategory    @relation(fields: [categoryId], references: [id])
+  parameters      TestParameter[]
+
+  @@index([categoryId])
+  @@index([isFeatured])
+  @@index([isPopular])
+  @@index([isTrending])
+}
+
+model TestParameter {
+  id              String         @id @default(uuid())
+  testId          String
+  name            String
+  unit            String
+  referenceRanges Json
+  isActive        Boolean        @default(true)
+  reportResults   ReportResult[]
+  test            Test           @relation(fields: [testId], references: [id], onDelete: Cascade)
+}
+
+model HealthPackage {
+  id              String           @id @default(uuid())
+  name            String
+  subtitle        String?
+  category        String           @default("General")
+  categoryId      String           @default("general")
+  description     String?
+  price           Float
+  oldPrice        Float
+  discount        String?
+  parametersCount Int
+  badge           String?
+  preparation     String?
+  reportTime      String           @default("24 Hours")
+  fastingRequired Boolean          @default(false)
+  homeCollection  Boolean          @default(true)
+  labVisit        Boolean          @default(true)
+isFeatured      Boolean          @default(false)
+isPopular       Boolean          @default(false)
+isTrending      Boolean          @default(false)
+displayOrder    Int              @default(0)
+isActive        Boolean          @default(true)
+bookings        BookingPackage[]
+testsIncluded   PackageTest[]
+}
+model PackageTest {
+  packageId String
+  testId    String
+  package   HealthPackage @relation(fields: [packageId], references: [id])
+  test      Test          @relation(fields: [testId], references: [id])
+
+  @@id([packageId, testId])
+}
+
+model Booking {
+  id                   String              @id @default(cuid())
+  bookingCode          String              @unique
+  userId               String
+  scheduledDate        DateTime
+  scheduledSlot        String
+  totalPaid            Float
+  status               BookingStatus       @default(PENDING)
+  addressId            String
+  branchId             String?
+  patientName          String
+  patientAge           Int?
+  patientGender        String?
+  patientMobile        String?
+  paymentId            String?
+  razorpayOrderId      String?
+  paymentLinkId        String?
+  paymentLinkUrl       String?
+  paymentStatus        PaymentStatus       @default(PENDING)
+  collectionMode       CollectionMode      @default(HOME)
+  paymentMode          PaymentMode?
+  paymentReceivedAt    DateTime?
+  paymentReceivedById  String?
+assignedExecutiveId  String?
+  assignedPartnerId    String?
+  partnerAssignedAt    DateTime?
+  partnerAcceptedAt    DateTime?
+  collectionStartedAt  DateTime?
+  sampleCollectedAt    DateTime?
+  deliveredToLabAt     DateTime?
+partnerNote          String?
+  collectionOtp        String?
+  otpVerified          Boolean             @default(false)
+  createdAt            DateTime            @default(now())
+  user                 User                @relation(fields: [userId], references: [id])
+  branch               Branch?             @relation(fields: [branchId], references: [id])
+  packages             BookingPackage[]
+  tests                BookingTest[]
+  report               Report?
+  paymentReceivedBy    User?               @relation("PaymentReceiver", fields: [paymentReceivedById], references: [id])
+  assignedExecutive    User?               @relation("AssignedExecutive", fields: [assignedExecutiveId], references: [id])
+  assignedPartner      PathologyPartner?   @relation("AssignedPartner", fields: [assignedPartnerId], references: [id])
+statusTimeline       BookingStatusLog[]
+  rejections           BookingRejection[]
+  prescriptions        Prescription[]
+}
+model Branch {
+  id                  String    @id @default(uuid())
+  name                String
+  code                String    @unique
+  line1               String
+  city                String
+  state               String
+  pincode             String
+  latitude            Float?
+  longitude           Float?
+  contactNumber       String?
+  email               String?
+  labRegNo            String?
+  workingHours        String?
+  availableSlots      Json?
+  homeCollection      Boolean   @default(true)
+  labVisit            Boolean   @default(true)
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  bookings            Booking[]
+  reports             Report[]  @relation("ReportBranch")
+}
+model BookingTest {
+  bookingId String
+  testId    String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  test      Test    @relation(fields: [testId], references: [id])
+
+  @@id([bookingId, testId])
+}
+
+model BookingPackage {
+  bookingId String
+  packageId String
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  package   HealthPackage @relation(fields: [packageId], references: [id])
+
+  @@id([bookingId, packageId])
+}
+model Report {
+  id                   String           @id @default(uuid())
+  bookingId            String           @unique
+  testName             String
+  reportedDate         DateTime         @default(now())
+  status               ReportStatus     @default(DRAFT)
+  clinicalNotes        String?
+  technicianRemarks    String?
+  doctorRemarks        String?
+  internalNotes        String?
+  hasAbnormalFlags     Boolean          @default(false)
+  verifiedById         String?
+  verifiedAt           DateTime?
+  recipientType        String?
+  recipientId          String?
+  pdfUrl               String?
+  pdfPublicId          String?
+  pdfUploadedAt        DateTime?
+  reportBranchId       String?
+  doctorName           String?
+  doctorQualification  String?
+  doctorRegNo          String?
+  doctorDesignation    String?
+  doctorVerifiedAt     DateTime?
+  booking              Booking          @relation(fields: [bookingId], references: [id])
+  verifiedBy           User?            @relation("ReportVerifier", fields: [verifiedById], references: [id])
+  reportBranch         Branch?          @relation("ReportBranch", fields: [reportBranchId], references: [id])
+  parameters           ReportResult[]
+  auditLogs            ReportAuditLog[]
+
+  @@index([reportedDate])
+}
+model ReportResult {
+  id             String         @id @default(uuid())
+  reportId       String
+  parameterId    String?
+  parameterName  String
+  observedValue  String
+  unit           String
+  referenceRange String
+  isAbnormal     Boolean        @default(false)
+  parameter      TestParameter? @relation(fields: [parameterId], references: [id])
+  report         Report         @relation(fields: [reportId], references: [id])
+}
+
+enum Role {
+  USER
+  ADMIN
+  PATHOLOGIST
+  EXECUTIVE
+  SUPER_ADMIN
+  FRANCHISE
+  LAB_DEPARTMENT
+  PATHOLOGY_PARTNER
+}
+model AdminRole {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  slug        String           @unique
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  permissions RolePermission[]
+  adminUsers  AdminUser[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  module      String
+  action      String
+  description String?
+  rolePerms   RolePermission[]
+
+  @@unique([module, action])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  role         AdminRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
+
+model AdminUser {
+  id                String              @id @default(uuid())
+  userId            String              @unique
+  roleId            String
+  franchiseId       String?
+  department        String?
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role              AdminRole           @relation(fields: [roleId], references: [id])
+  assignedChats     Conversation[]
+  supportAssignments SupportAssignment[]
+}
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String
+  action    String
+  module    String
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+enum CollectionMode {
+  HOME
+  LAB
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  QR_CODE
+  CARD
+}
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+ WAITING_FOR_ASSIGNMENT
+  WAITING_FOR_PARTNER
+  ASSIGNED
+  ACCEPTED
+  ON_THE_WAY
+  REACHED_LOCATION
+  SAMPLE_COLLECTED
+  DELIVERED_TO_LAB
+  PROCESSING
+  REPORT_READY
+  COMPLETED
+  CANCELLED
+}
+
+model BookingStatusLog {
+  id        String        @id @default(uuid())
+  bookingId String
+  status    BookingStatus
+  note      String?
+  updatedBy String?
+  createdAt DateTime      @default(now())
+  booking   Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+}
+
+enum ReportStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  RELEASED
+}
+
+model ReportAuditLog {
+  id         String   @id @default(uuid())
+  reportId   String
+  action     String
+  performedBy String
+  details    String?
+  createdAt  DateTime @default(now())
+  report     Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model Offer {
+  id          String    @id @default(uuid())
+  title       String
+  description String?
+  bannerUrl   String?
+  offerType   String    @default("FLAT")
+  discount    Float
+  startDate   DateTime?
+  endDate     DateTime?
+  priority    Int       @default(0)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model PathologyPartner {
+  id             String                @id @default(uuid())
+  userId         String                @unique
+  labName        String
+  role           String
+  cityId         String?
+  branchId       String?
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  approvalStatus PartnerApprovalStatus @default(PENDING)
+  rejectionReason String?
+  isAvailable    Boolean               @default(false)
+  rating         Float                 @default(0)
+  totalCollections Int                 @default(0)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings       Booking[]             @relation("AssignedPartner")
+}
+
+enum PartnerApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+model BookingRejection {
+  id        String   @id @default(uuid())
+  bookingId String
+  partnerId String
+  reason    String?
+  createdAt DateTime @default(now())
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, partnerId])
+}
+
+model Prescription {
+  id               String             @id @default(uuid())
+  userId           String
+  bookingId        String?
+  fileUrl          String
+  publicId         String
+  originalFileName String
+  fileType         String
+  mimeType         String
+  fileSize         Int
+  notes            String?
+  status           PrescriptionStatus @default(PENDING)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking          Booking?           @relation(fields: [bookingId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+}
+
+enum PrescriptionStatus {
+  PENDING
+  UNDER_REVIEW
+  REVIEWED
+  COMPLETED
+}
+
+model Conversation {
+  id           String             @id @default(uuid())
+  userId       String
+  status       ConversationStatus @default(AI_ACTIVE)
+  assignedToId String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo   AdminUser?         @relation(fields: [assignedToId], references: [id])
+  messages     ChatMessage[]
+  assignments  SupportAssignment[]
+}
+
+model ChatMessage {
+  id             String        @id @default(uuid())
+  conversationId String
+  senderType     SenderType
+  senderId       String
+  text           String?
+  attachmentUrl  String?
+  attachmentType String?
+  isRead         Boolean       @default(false)
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model SupportAssignment {
+  id             String       @id @default(uuid())
+  conversationId String
+  adminUserId    String
+  assignedAt     DateTime     @default(now())
+  closedAt       DateTime?
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  adminUser      AdminUser    @relation(fields: [adminUserId], references: [id])
+}
+
+enum ConversationStatus {
+  AI_ACTIVE
+  PENDING_HUMAN
+  HUMAN_ACTIVE
+  CLOSED
+}
+
+enum SenderType {
+  USER
+  BOT
+  AGENT
+}
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  description     String?
+  discountType    String    @default("FLAT")
+  discountValue   Float
+  minOrderAmount  Float     @default(0)
+  maxDiscount     Float?
+  usageLimit      Int?
+  usedCount       Int       @default(0)
+  expiresAt       DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
