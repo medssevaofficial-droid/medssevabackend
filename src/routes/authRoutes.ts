@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, registerPartner, login, getAllUsers, checkMobile, getPartners, updatePartnerApproval, getAvailablePartners } from '../controllers/authController';
+import { register, registerPartner, login, getAllUsers, checkMobile, getPartners, updatePartnerApproval, getAvailablePartners, getMe } from '../controllers/authController';
 import { authenticate, authorizeRoles } from '../middlewares/authMiddleware';
 
 const router = Router();
@@ -9,6 +9,8 @@ router.get('/check-mobile', checkMobile);
 router.post('/register', register);
 router.post('/register/partner', registerPartner);
 router.post('/login', login);
+
+router.get('/me', authenticate, getMe);
 
 // Admin only
 router.get('/users', authenticate, authorizeRoles('ADMIN', 'SUPER_ADMIN'), getAllUsers);

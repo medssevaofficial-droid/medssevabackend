@@ -209,6 +209,8 @@ partnerNote          String?
 statusTimeline       BookingStatusLog[]
   rejections           BookingRejection[]
   prescriptions        Prescription[]
+sample               Sample?
+  payment              Payment?   @relation("BookingPayment")
 }
 model Branch {
   id                  String    @id @default(uuid())
@@ -560,18 +562,426 @@ enum SenderType {
   AGENT
 }
 
+model Sample {
+  id              String        @id @default(uuid())
+  bookingId       String        @unique
+  accessionNumber String        @unique
+  sampleType      String
+  condition       SampleCondition @default(GOOD)
+  receivedAt      DateTime      @default(now())
+  receivedById    String
+  rejectionReason String?
+  notes           String?
+  status          SampleStatus  @default(RECEIVED)
+  processingStartedAt DateTime?
+  branchId        String?
+  booking         Booking       @relation(fields: [bookingId], references: [id])
+
+  @@index([status])
+  @@index([bookingId])
+}
+
+enum SampleCondition {
+  GOOD
+  HAEMOLYSED
+  INSUFFICIENT
+  LEAKED
+}
+
+enum SampleStatus {
+  RECEIVED
+  ACCESSIONED
+  PROCESSING
+  COMPLETED
+  REJECTED
+}
+
 model Coupon {
-  id              String    @id @default(uuid())
-  code            String    @unique
-  description     String?
-  discountType    String    @default("FLAT")
-  discountValue   Float
-  minOrderAmount  Float     @default(0)
-  maxDiscount     Float?
-  usageLimit      Int?
-  usedCount       Int       @default(0)
-  expiresAt       DateTime?
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                    String    @id @default(uuid())
+  code                  String    @unique
+  name                  String?
+  description           String?
+  discountType          String    @default("PERCENTAGE")
+  discountValue         Float
+  minOrderAmount        Float     @default(0)
+  maxDiscount           Float?
+  usageLimit            Int?
+  perUserLimit          Int       @default(1)
+  usedCount             Int       @default(0)
+  expiresAt             DateTime?
+  startsAt              DateTime?
+  isActive              Boolean   @default(true)
+  isFirstOrderOnly      Boolean   @default(false)
+  applicableUserType    String?
+  applicablePaymentMode String?
+  applicableCollectionMode String?
+  applicableCityIds     String[]  @default([])
+  applicableBranchIds   String[]  @default([])
+  applicableTestIds     String[]  @default([])
+  applicablePackageIds  String[]  @default([])
+  createdById           String?
+  updatedById           String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  redemptions           CouponRedemption[]
+  auditLogs             CouponAuditLog[]
+}
+
+model CouponRedemption {
+  id        String   @id @default(uuid())
+  couponId  String
+  userId    String
+  bookingId String?  @unique
+  discount  Float
+  createdAt DateTime @default(now())
+  coupon    Coupon   @relation(fields: [couponId], references: [id])
+
+  @@unique([couponId, userId, bookingId])
+  @@index([userId])
+  @@index([couponId])
+}
+
+model CouponAuditLog {
+  id              String   @id @default(uuid())
+  couponId        String
+  couponCode      String
+  action          String
+  performedById   String?
+  performedByRole String? 
+  ipAddress       String?
+  details         Json?
+  createdAt       DateTime @default(now())
+  coupon          Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([action])
+}
+model Payment {
+  id                  String        @id @default(uuid())
+  bookingId           String        @unique
+  razorpayOrderId     String?       @unique
+  razorpayPaymentId   String?       @unique
+  razorpaySignature   String?
+  amount              Float
+  tax                 Float         @default(0)
+  discount            Float         @default(0)
+  couponCode          String?
+  currency            String        @default("INR")
+  method              String?
+  gateway             String        @default("RAZORPAY")
+  status              PaymentTxStatus @default(PENDING)
+  invoiceNumber       String?       @unique
+  paymentReference    String?
+  collectedById       String?
+  branchId            String?
+  paidAt              DateTime?
+  failureReason       String?
+  webhookVerified     Boolean       @default(false)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  booking             Booking       @relation("BookingPayment", fields: [bookingId], references: [id])
+  refunds             Refund[]
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([paidAt])
+}
+
+model Refund {
+  id                  String        @id @default(uuid())
+  paymentId           String
+  bookingId           String
+  razorpayRefundId    String?       @unique
+  amount              Float
+  reason              String
+  approvalNotes       String?
+  status              RefundStatus  @default(PENDING)
+  requestedById       String?
+  approvedById        String?
+  processedAt         DateTime?
+  gatewayResponse     Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  payment             Payment       @relation(fields: [paymentId], references: [id])
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([bookingId])
+}
+
+model Settlement {
+  id                  String            @id @default(uuid())
+  settlementRef       String            @unique @default(cuid())
+  franchiseId         String?
+  franchiseName       String
+  period              String
+  periodStart         DateTime
+  periodEnd           DateTime
+  totalBusiness       Float
+  commissionRate      Float             @default(15)
+  commissionAmount    Float
+  deductions          Float             @default(0)
+  taxOnCommission     Float             @default(0)
+  netPayable          Float
+  status              SettlementStatus  @default(PENDING)
+  approvedById        String?
+  payoutReference     String?
+  gatewayResponse     Json?
+  processedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  financeAuditLogs    FinanceAuditLog[]
+
+  @@index([status])
+  @@index([periodStart])
+}
+
+model FinanceAuditLog {
+  id              String      @id @default(uuid())
+  action          String
+  module          String
+  paymentId       String?
+  refundId        String?
+  settlementId    String?
+  bookingRef      String?
+  txReference     String?
+  performedById   String?
+  performedByRole String?
+  ipAddress       String?
+  details         Json?
+  createdAt       DateTime    @default(now())
+  payment         Payment?    @relation(fields: [paymentId], references: [id])
+  refund          Refund?     @relation(fields: [refundId], references: [id])
+  settlement      Settlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([action])
+  @@index([createdAt])
+}
+
+enum PaymentTxStatus {
+  PENDING
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum SettlementStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Supplier {
+  id            String      @id @default(uuid())
+  name          String
+  contactPerson String?
+  phone         String?
+  email         String?
+  gstNumber     String?
+  address       String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  inventoryItems InventoryItem[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model InventoryItem {
+  id               String      @id @default(uuid())
+  sku              String      @unique
+  name             String
+  category         String
+  itemType         InventoryItemType @default(REAGENT)
+  supplierId       String?
+  manufacturer     String?
+  unit             String
+  currentStock     Float       @default(0)
+  minThreshold     Float       @default(0)
+  maxCapacity      Float?
+  batchNumber      String?
+  lotNumber        String?
+  manufacturingDate DateTime?
+  expiryDate       DateTime?
+  purchaseCost     Float?
+  branchId         String?
+  isActive         Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  supplier         Supplier?   @relation(fields: [supplierId], references: [id])
+  transactions     InventoryTransaction[]
+  consumptionRules TestConsumptionRule[]
+  purchaseOrderItems PurchaseOrderItem[]
+
+  @@index([branchId])
+  @@index([itemType])
+  @@index([expiryDate])
+}
+
+enum InventoryItemType {
+  REAGENT
+  CONSUMABLE
+  CHEMICAL
+  COLLECTION_KIT
+  TEST_KIT
+}
+
+model InventoryTransaction {
+  id              String      @id @default(uuid())
+  inventoryItemId String
+  transactionType TransactionType
+  quantity        Float
+  quantityBefore  Float
+  quantityAfter   Float
+  reason          String?
+  referenceNumber String?
+  remarks         String?
+  performedById   String?
+  branchId        String?
+  createdAt       DateTime    @default(now())
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([transactionType])
+  @@index([createdAt])
+}
+
+enum TransactionType {
+  STOCK_IN
+  STOCK_OUT
+  ADJUSTMENT
+  DAMAGED
+  EXPIRED
+  TRANSFER_IN
+  TRANSFER_OUT
+  AUTO_CONSUMED
+}
+
+model TestConsumptionRule {
+  id              String        @id @default(uuid())
+  testId          String
+  inventoryItemId String
+  quantityPerTest Float         @default(1)
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@unique([testId, inventoryItemId])
+  @@index([testId])
+}
+
+model PurchaseOrder {
+  id               String      @id @default(uuid())
+  poNumber         String      @unique
+  supplierId       String
+  purchaseDate     DateTime    @default(now())
+  expectedDelivery DateTime?
+  receivedDate     DateTime?
+  status           POStatus    @default(PENDING)
+  createdById      String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  supplier         Supplier    @relation(fields: [supplierId], references: [id])
+  items            PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  inventoryItemId String
+  quantity        Float
+  receivedQty     Float         @default(0)
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([purchaseOrderId])
+}
+
+enum POStatus {
+  PENDING
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+model CmsBanner {
+  id            String    @id @default(uuid())
+  title         String
+  subtitle      String?
+  description   String?
+  imageUrl      String
+  imagePublicId String?
+  linkType      String    @default("Package")
+  linkValue     String?
+  priority      Int       @default(0)
+  displayOrder  Int       @default(0)
+  startDate     DateTime?
+  endDate       DateTime?
+  cities        String[]  @default([])
+  branches      String[]  @default([])
+  isActive      Boolean   @default(true)
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model CmsConfig {
+  id              String   @id @default("singleton")
+  layoutSections  Json     @default("[]")
+  categoryOrder   Json     @default("[]")
+  featureFlags    Json     @default("{}")
+  maintenance     Json     @default("{}")
+  minVersion      Json     @default("{}")
+  contactInfo     Json     @default("{}")
+  socialLinks     Json     @default("{}")
+  updatedAt       DateTime @updatedAt
+  updatedById     String?
+}
+
+model CmsEmergencyAlert {
+  id          String    @id @default(uuid())
+  title       String
+  message     String
+  severity    String    @default("info")
+  startTime   DateTime  @default(now())
+  endTime     DateTime?
+  cities      String[]  @default([])
+  branches    String[]  @default([])
+  isActive    Boolean   @default(true)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model CmsPage {
+  id          String   @id
+  title       String
+  slug        String   @unique
+  content     String
+  isActive    Boolean  @default(true)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CmsAuditLog {
+  id               String   @id @default(uuid())
+  adminId          String?
+  adminRole        String?
+  action           String
+  resource         String
+  resourceId       String?
+  details          Json?
+  createdAt        DateTime @default(now())
 }

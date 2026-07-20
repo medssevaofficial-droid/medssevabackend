@@ -16,6 +16,12 @@ import branchRoutes from './routes/branchRoutes';
 import partnerRoutes from './routes/partnerRoutes';
 import prescriptionRoutes from './routes/prescriptionRoutes';
 import chatRoutes from './routes/chatRoutes';
+import analyticsRoutes from './routes/analyticsRoutes';
+import sampleRoutes from './routes/sampleRoutes';
+import financeRoutes from './routes/financeRoutes';
+import couponRoutes from './routes/couponRoutes';
+import inventoryRoutes from './routes/inventoryRoutes';
+import cmsRoutes from './routes/cmsRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
 
@@ -23,13 +29,14 @@ const app = express();
 
 app.use(cors());
 
-// Raw body capture for Razorpay webhook signature verification
-// Must be registered BEFORE express.json()
-app.use('/api/bookings/webhook/razorpay', express.raw({ type: 'application/json' }), (req: any, res, next) => {
+const rawBodyMiddleware = express.raw({ type: 'application/json' });
+const parseRawBody = (req: any, res: any, next: any) => {
   req.rawBody = req.body.toString('utf8');
   req.body = JSON.parse(req.rawBody);
   next();
-});
+};
+app.use('/api/bookings/webhook/razorpay', rawBodyMiddleware, parseRawBody);
+app.use('/api/finance/webhook/razorpay', rawBodyMiddleware, parseRawBody);
 
 app.use(express.json());
 
@@ -53,6 +60,12 @@ app.use('/api/branches', branchRoutes);
 app.use('/api/partner', partnerRoutes);
 app.use('/api/prescriptions', prescriptionRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/samples', sampleRoutes);
+app.use('/api/finance', financeRoutes);
+app.use('/api/coupons', couponRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/cms', cmsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

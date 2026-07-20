@@ -414,8 +414,14 @@ export function registerChatHandlers(io: Server, socket: Socket, prisma: PrismaC
     if (isAgent) socket.join('support:room');
   });
 
+socket.on('lims:join', () => {
+    const isLabStaff = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'].includes(userRole);
+    if (isLabStaff) socket.join('lims:room');
+  });
+
   socket.on('disconnect', () => {
     socket.leave('support:room');
+    socket.leave('lims:room');
   });
 }
 

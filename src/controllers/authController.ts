@@ -61,6 +61,15 @@ export const registerPartner = async (req: Request, res: Response) => {
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, mobile, password } = req.body;
+
+    if (!name || !mobile || !password) {
+      return res.status(400).json({ error: 'name, mobile, and password are required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
     const existingUser = await prisma.user.findFirst({
       where: {
         OR: [
@@ -70,23 +79,24 @@ export const register = async (req: Request, res: Response) => {
       }
     });
 
-if (existingUser) {
+    if (existingUser) {
       if (existingUser.mobile === mobile) {
         return res.status(400).json({ error: 'Mobile number already registered. Please login instead.' });
       }
       return res.status(400).json({ error: 'Email already in use. Try a different email.' });
     }
 
-const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
         name,
         email: email || undefined,
         mobile,
-        password: hashedPassword
+        password: hashedPassword,
       }
     });
+
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
 
     res.status(201).json({
@@ -115,34 +125,16 @@ export const login = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-   let isNewUser = false;
 
-    if (mobile && !user) {
-      console.log(`✨ New User Detected! Auto-registering mobile=${mobile}...`);
-      const hashedPassword = await bcrypt.hash(password, 10);
-      user = await prisma.user.create({
-        data: {
-          name: `User ${mobile.slice(-4)}`,
-          email: `${mobile}@medsseva.com`,
-          mobile,
-          password: hashedPassword
-        }
-      });
-      isNewUser = true;
-    } else {
-      if (!user.password) {
-        console.log('❌ User has no password set');
-        return res.status(401).json({ error: 'Invalid mobile number or password' });
-      }
-
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        console.log('❌ Password mismatch');
-        return res.status(401).json({ error: 'Invalid mobile number or password' });
-      }
+    if (!user.password) {
+      return res.status(401).json({ error: 'Invalid mobile number or password' });
     }
 
-// Block PATHOLOGY_PARTNER from user login
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid mobile number or password' });
+    }
+
     if (user.role === 'PATHOLOGY_PARTNER') {
       const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
       if (!partner) return res.status(403).json({ error: 'Partner profile not found' });
@@ -170,16 +162,15 @@ export const login = async (req: Request, res: Response) => {
             labName: partner.labName,
             approvalStatus: partner.approvalStatus,
             isAvailable: partner.isAvailable,
-            rating: partner.rating
-          }
+            rating: partner.rating,
+          },
         },
-        token
+        token,
       });
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
 
-    // Load RBAC permissions if admin user
     let permissions: string[] = [];
     let adminRoleName: string | null = null;
     let adminRoleSlug: string | null = null;
@@ -196,7 +187,7 @@ export const login = async (req: Request, res: Response) => {
       },
     });
 
-  if (adminUser && adminUser.isActive) {
+    if (adminUser && adminUser.isActive) {
       permissions = adminUser.role.permissions.map(
         (rp) => `${rp.permission.module}.${rp.permission.action}`
       );
@@ -217,7 +208,7 @@ export const login = async (req: Request, res: Response) => {
     }
 
     res.json({
-      message: isNewUser ? 'Auto-registration & Login successful' : 'Login successful',
+      message: 'Login successful',
       user: {
         id: user.id,
         name: user.name,
@@ -230,14 +221,12 @@ export const login = async (req: Request, res: Response) => {
         accessibleModules,
       },
       token,
-      isNewUser,
     });
   } catch (error: any) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Failed to login', details: error.message });
   }
 };
-
 export const checkMobile = async (req: Request, res: Response) => {
   try {
     const { mobile } = req.query;
@@ -248,23 +237,12 @@ export const checkMobile = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { mobile } });
 
-    if (user) {
-      // OTP already verified identity — issue a session token directly
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-      return res.json({
-        exists: true,
-        user: { id: user.id, name: user.name, mobile: user.mobile, email: user.email, role: user.role },
-        token
-      });
-    }
-
-    return res.json({ exists: false });
+    return res.json({ exists: !!user });
   } catch (error: any) {
     console.error('Check mobile error:', error);
     res.status(500).json({ error: 'Failed to check mobile number', details: error.message });
   }
 };
-
 export const createAdminUser = async (req: Request, res: Response) => {
   try {
     const { name, email, password, roleId, franchiseId, department } = req.body;
@@ -470,6 +448,66 @@ export const getAvailablePartners = async (req: Request, res: Response) => {
     res.json(partners);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch available partners', details: error.message });
+  }
+};
+
+export const getMe = async (req: any, res: Response) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    let permissions: string[] = [];
+    let adminRoleName: string | null = null;
+    let adminRoleSlug: string | null = null;
+    let accessibleModules: string[] = [];
+
+    const adminUser = await prisma.adminUser.findUnique({
+      where: { userId: user.id },
+      include: {
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
+      },
+    });
+
+    if (adminUser && adminUser.isActive) {
+      permissions = adminUser.role.permissions.map(
+        (rp) => `${rp.permission.module}.${rp.permission.action}`
+      );
+      adminRoleName = adminUser.role.name;
+      adminRoleSlug = adminUser.role.slug;
+      accessibleModules = [
+        ...new Set(
+          adminUser.role.permissions
+            .filter((rp) => rp.permission.action === 'view')
+            .map((rp) => rp.permission.module)
+        ),
+      ];
+    } else if (user.role === 'SUPER_ADMIN') {
+      adminRoleName = 'Super Admin';
+      adminRoleSlug = 'super_admin';
+      permissions = ['*'];
+      accessibleModules = ['*'];
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        role: user.role,
+        adminRole: adminRoleName,
+        adminRoleSlug,
+        permissions,
+        accessibleModules,
+      },
+    });
+  } catch (error: any) {
+    console.error('getMe error:', error);
+    res.status(500).json({ error: 'Failed to fetch profile', details: error.message });
   }
 };
 

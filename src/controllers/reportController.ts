@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { autoConsumeForTest } from './inventoryController';
 
 const prisma = new PrismaClient();
 
@@ -256,10 +257,21 @@ export const finalizeReport = async (req: AuthRequest, res: Response) => {
       include: { parameters: true, auditLogs: true, booking: true },
     });
 
-    await prisma.booking.update({
+await prisma.booking.update({
       where: { id: report.bookingId },
       data: { status: 'REPORT_READY' },
     });
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: report.bookingId },
+      include: { tests: true },
+    });
+
+    if (booking?.tests?.length) {
+      for (const bt of booking.tests) {
+        await autoConsumeForTest(bt.testId, finalized.booking.bookingCode, req.user?.id);
+      }
+    }
 
     res.json(finalized);
   } catch (error: any) {
