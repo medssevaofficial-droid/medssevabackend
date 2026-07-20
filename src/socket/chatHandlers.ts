@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import Groq from 'groq-sdk';
-
+import { sendNotificationToUser } from '../services/notification.service';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
 
 async function fetchLiveContext(userMessage: string, prisma: PrismaClient): Promise<string> {
@@ -265,10 +265,36 @@ export function registerChatHandlers(io: Server, socket: Socket, prisma: PrismaC
         data: { updatedAt: new Date() },
       });
 
-      io.to(`conversation:${conversationId}`).emit('chat:message', {
+ io.to(`conversation:${conversationId}`).emit('chat:message', {
         ...userMsg,
         senderName: userName,
       });
+
+    if (isAgent && conversation.userId) {
+        sendNotificationToUser(
+          conversation.userId,
+          'New Support Message',
+          text || 'You have a new message from support.',
+          'NEW_CHAT_MESSAGE',
+          { conversationId }
+        ).catch(console.error);
+      }
+
+      if (!isAgent && conversation.status === 'HUMAN_ACTIVE' && conversation.assignedToId) {
+        const adminUser = await prisma.adminUser.findUnique({
+          where: { id: conversation.assignedToId },
+          select: { userId: true },
+        });
+        if (adminUser?.userId) {
+          sendNotificationToUser(
+            adminUser.userId,
+            'New Customer Message',
+            text || 'A customer sent a new message.',
+            'NEW_CHAT_MESSAGE',
+            { conversationId }
+          ).catch(console.error);
+        }
+      }
 
       if (isAgent) return;
       if (conversation.status === 'HUMAN_ACTIVE') return;

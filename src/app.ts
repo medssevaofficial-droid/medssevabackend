@@ -22,8 +22,12 @@ import financeRoutes from './routes/financeRoutes';
 import couponRoutes from './routes/couponRoutes';
 import inventoryRoutes from './routes/inventoryRoutes';
 import cmsRoutes from './routes/cmsRoutes';
+import notificationRoutes from './routes/notificationRoutes';
 import { globalLimiter } from './middlewares/rateLimiter';
 import { errorHandler } from './middlewares/errorHandler';
+import { apiRequestLogger } from './middlewares/apiLogger';
+import auditRoutes from './routes/auditRoutes';
+import settingsRoutes from './routes/settingsRoutes';
 
 const app = express();
 
@@ -40,7 +44,7 @@ app.use('/api/finance/webhook/razorpay', rawBodyMiddleware, parseRawBody);
 
 app.use(express.json());
 
-// Global Rate Limiting
+app.use(apiRequestLogger);
 app.use('/api', globalLimiter);
 
 // Routes
@@ -66,6 +70,9 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/cms', cmsRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/admin/audit-logs', auditRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

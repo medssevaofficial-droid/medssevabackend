@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedPackages(prisma: PrismaClient) {
-  console.log('🔄 Seeding packages...');
+  console.log('Seeding packages...');
 
   await prisma.bookingPackage.deleteMany();
   await prisma.packageTest.deleteMany();
@@ -233,10 +233,10 @@ export async function seedPackages(prisma: PrismaClient) {
           data: { packageId: createdPkg.id, testId: test.id },
         });
       } else {
-        console.warn(`⚠️ Test not found for package "${pkg.name}": ${testName}`);
+        console.warn(`Test not found for package "${pkg.name}": ${testName}`);
       }
     }
   }
 
-  console.log(`✅ Packages seeded (${packages.length} packages with linked tests)`);
+  console.log(`Packages seeded (${packages.length} packages with linked tests)`);
 }

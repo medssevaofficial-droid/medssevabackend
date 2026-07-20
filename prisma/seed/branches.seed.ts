@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedBranches(prisma: PrismaClient) {
-  console.log('🏢 Seeding branches...');
+  console.log('Seeding branches...');
 
   const branchesData = [
     {
@@ -115,5 +115,5 @@ export async function seedBranches(prisma: PrismaClient) {
       create: branch,
     });
   }
-  console.log('✅ Branches seeded (6 branches across Mumbai, Thane, Navi Mumbai, Vasai, Pune)');
+  console.log('Branches seeded (6 branches across Mumbai, Thane, Navi Mumbai, Vasai, Pune)');
 }

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-
+import { sendNotificationToUser } from '../services/notification.service';
 const prisma = new PrismaClient();
 
 // Partner's own assigned bookings (active jobs)
@@ -171,7 +171,7 @@ export const acceptBooking = async (req: any, res: Response) => {
       });
     }
 
-   const updatedBooking = await prisma.booking.findUnique({
+const updatedBooking = await prisma.booking.findUnique({
       where: { id },
       include: {
         assignedPartner: {
@@ -183,6 +183,11 @@ export const acceptBooking = async (req: any, res: Response) => {
         }
       }
     });
+
+    if (updatedBooking) {
+      sendNotificationToUser(updatedBooking.userId, 'Booking Accepted', 'Your booking has been accepted.', 'BOOKING_ACCEPTED', { bookingId: id }).catch(console.error);
+    }
+
     res.json(updatedBooking);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to accept booking', details: error.message });
@@ -207,7 +212,7 @@ const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
       return res.status(400).json({ error: 'Booking cannot be rejected at this stage.' });
     }
 
-    // If partner already accepted, release the booking back to the pool
+   
     if (booking.status === 'ACCEPTED' && booking.assignedPartnerId === partner.id) {
       await prisma.booking.update({
         where: { id },
@@ -220,7 +225,7 @@ const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
         },
       });
     }
-    // Record rejection — this partner won't see this booking again
+   
     await prisma.bookingRejection.upsert({
       where: { bookingId_partnerId: { bookingId: id, partnerId: partner.id } },
       update: { reason: reason || null },
@@ -236,7 +241,7 @@ const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
       }
     });
 
-    // Check if ALL approved+available partners have now rejected
+
     const [totalEligible, totalRejections] = await Promise.all([
       prisma.pathologyPartner.count({
         where: { approvalStatus: 'APPROVED', isAvailable: true }
@@ -245,9 +250,14 @@ const canReject = booking.status === 'WAITING_FOR_PARTNER' ||
     ]);
 
     if (totalEligible > 0 && totalRejections >= totalEligible) {
-      // All partners rejected — Admin needs to manually assign
-      console.warn(`⚠️  All partners rejected booking ${id}. Admin manual assignment required.`);
-      // TODO: fire push/email notification to admin here
+    
+      console.warn(`All partners rejected booking ${id}. Admin manual assignment required.`);
+   
+    }
+
+const rejectedBooking = await prisma.booking.findUnique({ where: { id } });
+    if (rejectedBooking) {
+      sendNotificationToUser(rejectedBooking.userId, 'Booking Update', 'Unfortunately your booking could not be accepted.', 'BOOKING_REJECTED', { bookingId: id }).catch(console.error);
     }
 
     res.json({ message: 'Booking rejected successfully.' });
@@ -308,11 +318,23 @@ export const updateBookingStatus = async (req: any, res: Response) => {
       });
     }
 
-    const updated = await prisma.booking.update({ where: { id }, data: updateData });
+const updated = await prisma.booking.update({ where: { id }, data: updateData });
 
     await prisma.bookingStatusLog.create({
       data: { bookingId: id, status: status as any, note: note || null, updatedBy: req.user.id }
     });
+
+    const notifMap: Record<string, { title: string; body: string; type: any }> = {
+      ON_THE_WAY: { title: 'Partner On The Way', body: 'Your sample collection executive is on the way.', type: 'PARTNER_ON_THE_WAY' },
+      REACHED_LOCATION: { title: 'Partner Arrived', body: 'Your sample collection executive has arrived.', type: 'PARTNER_ARRIVED' },
+      SAMPLE_COLLECTED: { title: 'Sample Collected', body: 'Sample collected successfully.', type: 'SAMPLE_COLLECTED' },
+      DELIVERED_TO_LAB: { title: 'Sample Received in Lab', body: 'Your sample has reached the laboratory.', type: 'SAMPLE_RECEIVED_IN_LAB' },
+    };
+
+    const notif = notifMap[status];
+    if (notif) {
+      sendNotificationToUser(booking.userId, notif.title, notif.body, notif.type, { bookingId: id }).catch(console.error);
+    }
 
     res.json(updated);
   } catch (error: any) {

@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 export async function seedRbac(prisma: PrismaClient) {
-  console.log('🔐 Seeding RBAC (roles, permissions, super admin)...');
+  console.log('Seeding RBAC (roles, permissions, super admin)...');
 
   // 1. Modules used across the admin panel
   const modules = [
@@ -37,7 +37,7 @@ export async function seedRbac(prisma: PrismaClient) {
       permissionRecords.push(perm);
     }
   }
-  console.log(`✅ ${permissionRecords.length} permissions created`);
+  console.log(`${permissionRecords.length} permissions created`);
 
   // 3. Create Admin Roles
   const roleDefs = [
@@ -58,7 +58,7 @@ export async function seedRbac(prisma: PrismaClient) {
     });
     roles[def.slug] = role;
   }
-  console.log('✅ Admin roles created');
+  console.log('Admin roles created');
 
   // 4. Map permissions to roles
   // Super Admin -> everything
@@ -125,7 +125,7 @@ export async function seedRbac(prisma: PrismaClient) {
       create: { roleId: roles['lab-department'].id, permissionId: perm.id },
     });
   }
-  console.log('✅ Role-permission mapping done');
+  console.log('Role-permission mapping done');
 
   // 5. Create Super Admin User + AdminUser
   const hashedPassword = await bcrypt.hash('SuperAdmin@123', 10);
@@ -153,5 +153,5 @@ export async function seedRbac(prisma: PrismaClient) {
     },
   });
 
-  console.log('✅ Super admin user created (mobile: 9999999999 / password: SuperAdmin@123)');
+  console.log('Super admin user created (mobile: 9999999999 / password: SuperAdmin@123)');
 }

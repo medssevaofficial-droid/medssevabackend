@@ -1,8 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { AuthRequest } from './authMiddleware';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { createAuditLog } from '../services/audit.service';
 
 export const requirePermission = (permission: string) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -19,26 +17,18 @@ export const requirePermission = (permission: string) => {
     });
   };
 };
-/**
- * Log important admin actions to AuditLog table.
- */
 export const auditLog = (action: string, module: string) => {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (req.user?.id) {
-      try {
-        await prisma.auditLog.create({
-          data: {
-            userId: req.user.id,
-            action,
-            module,
-            details: { body: req.body, params: req.params },
-            ipAddress: req.ip || req.socket.remoteAddress || '',
-            userAgent: req.headers['user-agent'] || '',
-          },
-        });
-      } catch (e) {
-        console.error('AuditLog error:', e);
-      }
+      await createAuditLog({
+        userId: req.user.id,
+        action,
+        module,
+        performedByRole: req.user.role,
+        ipAddress: req.ip || req.socket?.remoteAddress,
+        userAgent: req.headers['user-agent'] as string,
+        metadata: { params: req.params },
+      });
     }
     next();
   };

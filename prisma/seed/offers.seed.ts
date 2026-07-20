@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedOffers(prisma: PrismaClient) {
-  console.log('🔄 Seeding offers...');
+  console.log('Seeding offers...');
 
   await prisma.offer.createMany({
     skipDuplicates: true,
@@ -33,5 +33,5 @@ export async function seedOffers(prisma: PrismaClient) {
     ],
   });
 
-  console.log('✅ Offers seeded');
+  console.log('Offers seeded');
 }

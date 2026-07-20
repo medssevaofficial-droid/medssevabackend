@@ -12,7 +12,7 @@ import { seedRbac } from './rbac.seed';
 const prisma = new PrismaClient();
 
 export async function main() {
-  console.log('🌱 Starting MedsSeva production seed...\n');
+  console.log('Starting MedsSeva production seed...\n');
 
   try {
     // Order matters — categories before tests, rbac before admin user
@@ -24,9 +24,9 @@ export async function main() {
     await seedOffers(prisma);
     await seedCoupons(prisma);
 
-    console.log('\n✨ All seeds completed successfully!');
+    console.log('\nAll seeds completed successfully!');
   } catch (e) {
-    console.error('❌ Seed failed:', e);
+    console.error('Seed failed:', e);
     process.exit(1);
   } finally {
     await prisma.$disconnect();

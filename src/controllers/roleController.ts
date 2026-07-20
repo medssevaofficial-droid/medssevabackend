@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { createAuditLog } from '../services/audit.service';
 
 const prisma = new PrismaClient();
-
 // GET /api/roles
 export const getRoles = async (req: AuthRequest, res: Response) => {
   try {
@@ -55,17 +55,18 @@ export const createRole = async (req: AuthRequest, res: Response) => {
       include: { permissions: { include: { permission: true } } },
     });
 
-    // Audit log
-    if (req.user?.id) {
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'ROLE_CREATED',
-          module: 'roles_permissions',
-          details: { roleName: name },
-          ipAddress: req.ip || '',
-          userAgent: req.headers['user-agent'] || '',
-        },
+if (req.user?.id) {
+      await createAuditLog({
+        userId: req.user.id,
+        action: 'ROLE_CREATED',
+        module: 'roles_permissions',
+        entityType: 'AdminRole',
+        entityId: role.id,
+        performedByRole: req.user.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+        severity: 'MEDIUM',
+        metadata: { roleName: name },
       });
     }
 
@@ -102,16 +103,18 @@ export const updateRole = async (req: AuthRequest, res: Response) => {
       include: { permissions: { include: { permission: true } } },
     });
 
-    if (req.user?.id) {
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'ROLE_UPDATED',
-          module: 'roles_permissions',
-          details: { roleId: id, roleName: name },
-          ipAddress: req.ip || '',
-          userAgent: req.headers['user-agent'] || '',
-        },
+if (req.user?.id) {
+      await createAuditLog({
+        userId: req.user.id,
+        action: 'ROLE_UPDATED',
+        module: 'roles_permissions',
+        entityType: 'AdminRole',
+        entityId: id,
+        performedByRole: req.user.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+        severity: 'MEDIUM',
+        metadata: { roleId: id, roleName: name },
       });
     }
 
@@ -202,19 +205,20 @@ export const assignAdminRole = async (req: AuthRequest, res: Response) => {
       include: { role: true, user: { select: { name: true, email: true } } },
     });
 
-    if (req.user?.id) {
-      await prisma.auditLog.create({
-        data: {
-          userId: req.user.id,
-          action: 'ADMIN_CREATED',
-          module: 'roles_permissions',
-          details: { targetUserId: userId, roleId },
-          ipAddress: req.ip || '',
-          userAgent: req.headers['user-agent'] || '',
-        },
+if (req.user?.id) {
+      await createAuditLog({
+        userId: req.user.id,
+        action: 'ADMIN_ROLE_ASSIGNED',
+        module: 'roles_permissions',
+        entityType: 'AdminUser',
+        entityId: adminUser.id,
+        performedByRole: req.user.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+        severity: 'HIGH',
+        metadata: { targetUserId: userId, roleId },
       });
     }
-
     res.status(201).json(adminUser);
   } catch (e: any) {
     res.status(500).json({ error: e.message });

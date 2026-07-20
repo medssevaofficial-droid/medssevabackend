@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import { sendNotificationToUser, sendNotificationToMultipleUsers } from '../services/notification.service';
 
 const prisma = new PrismaClient();
 
@@ -32,10 +33,7 @@ const ALL_SLOTS = [
   '08:00 PM - 09:00 PM',
 ];
 
-/**
- * Parses a slot string like "06:00 AM - 07:00 AM"
- * Returns { startMinutes, endMinutes } as minutes from midnight
- */
+
 const parseSlotMinutes = (slot: string): { startMinutes: number; endMinutes: number } | null => {
   const parts = slot.split(' - ');
   if (parts.length !== 2) return null;
@@ -176,7 +174,7 @@ const bookings = await prisma.booking.findMany({
         report: {
           include: { parameters: true }
         },
-        assignedPartner: {
+assignedPartner: {
           include: {
             user: {
               select: {
@@ -187,6 +185,7 @@ const bookings = await prisma.booking.findMany({
             }
           }
         },
+        branch: true,
         statusTimeline: {
           orderBy: { createdAt: 'asc' }
         }
@@ -271,7 +270,7 @@ export const createBooking = async (req: any, res: Response) => {
   } = req.body;
   const safeTests = Array.isArray(tests) ? tests : [];
     const safeCollectionMode = collectionMode === 'lab' ? 'LAB' : 'HOME';
-    console.log('📦 Received Booking Payload:', req.body);
+    console.log('Received Booking Payload:', req.body);
 
     // Verify Payment Signature for Online Payments
     if (razorpay_payment_id && razorpay_order_id && razorpay_signature) {
@@ -425,9 +424,9 @@ const testItems = safeTests.filter((item: any) => item.itemType === 'test' || !i
         patientAge: patientAge ? Number(patientAge) : null,
         patientGender: patientGender || null,
         patientMobile: mobile || user.mobile || null,
-    status: razorpay_payment_id
-          ? (safeCollectionMode === 'HOME' ? 'WAITING_FOR_PARTNER' : 'CONFIRMED')
-          : (safeCollectionMode === 'HOME' ? 'WAITING_FOR_PARTNER' : 'PENDING'),
+status: safeCollectionMode === 'HOME'
+          ? 'WAITING_FOR_PARTNER'
+          : 'WAITING_FOR_ASSIGNMENT',
         paymentStatus: razorpay_payment_id ? 'SUCCESS' : 'PENDING',
         collectionMode: safeCollectionMode as any,
         addressId: finalAddressId,
@@ -451,10 +450,22 @@ const testItems = safeTests.filter((item: any) => item.itemType === 'test' || !i
         user: true,
       }
     });
-    console.log('✅ Booking Created Successfully:', booking.id);
+   console.log('Booking Created Successfully:', booking.id);
+
+    sendNotificationToUser(user.id, 'Booking Created', 'Your booking has been created successfully.', 'BOOKING_CREATED', { bookingId: booking.id }).catch(console.error);
+
+    const availablePartners = await prisma.pathologyPartner.findMany({
+      where: { approvalStatus: 'APPROVED', isAvailable: true },
+      include: { user: { select: { id: true } } },
+    });
+    if (availablePartners.length > 0 && safeCollectionMode === 'HOME') {
+      const partnerUserIds = availablePartners.map(p => p.user.id);
+      sendNotificationToMultipleUsers(partnerUserIds, 'New Booking Assigned', `${booking.user?.name || 'A patient'} has placed a new booking.`, 'NEW_BOOKING_ASSIGNED', { bookingId: booking.id }).catch(console.error);
+    }
+
     res.status(201).json(booking);
   } catch (error: any) {
-    console.error('❌ CRITICAL ERROR creating booking:', error);
+    console.error('CRITICAL ERROR creating booking:', error);
     res.status(500).json({ 
       error: 'Failed to create booking', 
       details: error.message 
@@ -508,11 +519,10 @@ export const updatePaymentStatus = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'Payment has already been marked as received for this booking.' });
     }
 
-    const actorRole = req.user.role;
+const actorRole = req.user.role;
     const actorId = req.user.id;
 
-    // Role-based permission check
-const isAdminLevel = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(actorRole);
+    const isAdminLevel = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(actorRole);
     if (booking.collectionMode === 'LAB') {
       if (!isAdminLevel) {
         return res.status(403).json({ error: 'Only Pathology Admin can mark payment received for Lab Visit bookings.' });
@@ -524,19 +534,36 @@ const isAdminLevel = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(actorRole)
       }
     }
 
-    const updated = await prisma.booking.update({
+const updated = await prisma.booking.update({
       where: { id },
       data: {
         paymentStatus: upperStatus as any,
         paymentMode: paymentMode ? paymentMode.toUpperCase() as any : undefined,
         paymentReceivedAt: upperStatus === 'SUCCESS' ? new Date() : undefined,
         paymentReceivedById: upperStatus === 'SUCCESS' ? actorId : undefined,
-        // Auto-confirm booking when payment received
-        status: upperStatus === 'SUCCESS' ? 'CONFIRMED' : undefined,
       },
     });
 
-    console.log(`✅ Payment marked ${upperStatus} for booking ${id} by ${actorRole} ${actorId}`);
+    if (upperStatus === 'SUCCESS') {
+      await prisma.bookingStatusLog.create({
+        data: {
+          bookingId: id,
+          status: booking.status as any,
+          note: booking.collectionMode === 'LAB'
+            ? 'Payment received at lab counter'
+            : 'Payment received for home collection',
+          updatedBy: actorId,
+        },
+      });
+    }
+console.log(` Payment marked ${upperStatus} for booking ${id} by ${actorRole} ${actorId}`);
+
+    if (upperStatus === 'SUCCESS') {
+      sendNotificationToUser(booking.userId, 'Payment Received', 'Payment received successfully.', 'PAYMENT_SUCCESS', { bookingId: id }).catch(console.error);
+    } else if (upperStatus === 'FAILED') {
+      sendNotificationToUser(booking.userId, 'Payment Failed', 'Payment failed. Please retry.', 'PAYMENT_FAILED', { bookingId: id }).catch(console.error);
+    }
+
     res.json(updated);
   } catch (error: any) {
     console.error('Failed to update payment status:', error);
@@ -557,14 +584,15 @@ export const generatePaymentLink = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'Payment has already been received for this booking.' });
     }
 
-    const actorRole = req.user.role;
+const actorRole = req.user.role;
     const actorId = req.user.id;
-    if (booking.collectionMode === 'LAB' && !['ADMIN', 'PATHOLOGIST'].includes(actorRole)) {
+    const isAdminLevel = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(actorRole);
+    if (booking.collectionMode === 'LAB' && !isAdminLevel) {
       return res.status(403).json({ error: 'Only Admin/Pathologist can generate payment QR for Lab Visit bookings.' });
     }
     if (booking.collectionMode === 'HOME') {
       const isAssignedExecutive = actorRole === 'EXECUTIVE' && booking.assignedExecutiveId === actorId;
-      if (!isAssignedExecutive && actorRole !== 'ADMIN') {
+      if (!isAssignedExecutive && !isAdminLevel) {
         return res.status(403).json({ error: 'Only the assigned Executive or Admin can generate payment QR for Home Collection bookings.' });
       }
     }
@@ -610,19 +638,37 @@ export const checkPaymentLinkStatus = async (req: any, res: Response) => {
 
     const link = await razorpay.paymentLink.fetch(booking.paymentLinkId);
 
-    if (link.status === 'paid') {
+if (link.status === 'paid') {
+      const isLabVisit = booking.collectionMode === 'LAB';
       const updated = await prisma.booking.update({
         where: { id },
         data: {
           paymentStatus: 'SUCCESS',
+          paymentMode: 'UPI',
           paymentReceivedAt: new Date(),
           paymentReceivedById: req.user.id,
-          status: 'CONFIRMED',
         },
       });
+
+      await prisma.bookingStatusLog.create({
+        data: {
+          bookingId: id,
+          status: updated.status as any,
+          note: isLabVisit ? 'Payment received at lab counter via QR/UPI' : 'Payment received via payment link',
+          updatedBy: req.user.id,
+        },
+      });
+
+      sendNotificationToUser(
+        booking.userId,
+        'Payment Received',
+        'Your payment has been received. Staff will proceed with sample collection.',
+        'PAYMENT_SUCCESS',
+        { bookingId: id }
+      ).catch(console.error);
+
       return res.json({ paymentStatus: 'SUCCESS', booking: updated });
     }
-
     res.json({ paymentStatus: 'PENDING', booking });
   } catch (error: any) {
     console.error('Failed to check payment link status:', error);
@@ -657,6 +703,14 @@ const updated = await prisma.booking.update({
       where: { id },
       data: { status: 'SAMPLE_COLLECTED' },
     });
+
+    sendNotificationToUser(
+      booking.userId,
+      'Sample Collected',
+      'Your sample has been collected and is on the way to the lab.',
+      'SAMPLE_COLLECTED',
+      { bookingId: id }
+    ).catch(console.error);
 
     await prisma.bookingStatusLog.create({
       data: {
@@ -714,7 +768,7 @@ export const assignPartner = async (req: any, res: Response) => {
       },
     });
 
-    await prisma.bookingStatusLog.create({
+await prisma.bookingStatusLog.create({
       data: {
         bookingId: id,
         status: 'ASSIGNED',
@@ -723,13 +777,20 @@ export const assignPartner = async (req: any, res: Response) => {
       }
     });
 
+    sendNotificationToUser(
+      booking.userId,
+      'Partner Assigned',
+      `A sample collection partner has been assigned to your booking.`,
+      'BOOKING_ACCEPTED',
+      { bookingId: id }
+    ).catch(console.error);
+
     res.json(updated);
   } catch (error: any) {
     console.error('Failed to assign partner:', error);
     res.status(500).json({ error: 'Failed to assign partner', details: error.message });
   }
 };
-
 // Generate 4-digit OTP when partner accepts (pay-at-doorstep only)
 export const generateCollectionOtp = async (req: any, res: Response) => {
   try {
@@ -816,10 +877,9 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
     const event = req.body;
     const eventType = event.event;
 
-    console.log(`📡 Razorpay Webhook: ${eventType}`);
+    console.log(`Razorpay Webhook: ${eventType}`);
 
-    // Payment link paid — UPI collection at doorstep
-    if (eventType === 'payment_link.paid') {
+ if (eventType === 'payment_link.paid') {
       const paymentLinkId = event.payload?.payment_link?.entity?.id;
       if (!paymentLinkId) return res.json({ status: 'ok' });
 
@@ -846,16 +906,27 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
           data: {
             bookingId: booking.id,
             status: booking.status as any,
-            note: 'UPI payment confirmed via Razorpay webhook',
+            note: booking.collectionMode === 'LAB'
+              ? 'Lab counter payment confirmed via Razorpay webhook'
+              : 'UPI payment confirmed via Razorpay webhook',
           },
         });
 
-        console.log(`✅ Payment auto-confirmed for booking ${booking.id} via webhook`);
+        sendNotificationToUser(
+          booking.userId,
+          'Payment Received',
+          booking.collectionMode === 'LAB'
+            ? 'Payment confirmed. The lab staff will now collect your sample.'
+            : 'Payment received successfully.',
+          'PAYMENT_SUCCESS',
+          { bookingId: booking.id }
+        ).catch(console.error);
+
+        console.log(`Payment auto-confirmed for booking ${booking.id} via webhook`);
       }
 
       return res.json({ status: 'ok' });
     }
-
     // Payment failed
     if (eventType === 'payment.failed') {
       const paymentLinkId = event.payload?.payment?.entity?.payment_link_id;
@@ -869,7 +940,7 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
               note: `UPI payment failed: ${event.payload?.payment?.entity?.error_description || 'Unknown error'}`,
             },
           });
-          console.warn(`❌ Payment failed for booking ${booking.id}`);
+          console.warn(`Payment failed for booking ${booking.id}`);
         }
       }
       return res.json({ status: 'ok' });
@@ -880,6 +951,247 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Webhook error:', error);
     res.status(500).json({ error: 'Webhook processing failed', details: error.message });
+  }
+};
+
+export const acceptLabBooking = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only Lab Admin can accept bookings.' });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.collectionMode !== 'LAB') {
+      return res.status(400).json({ error: 'This action is only valid for Lab Visit bookings.' });
+    }
+    if (booking.status !== 'WAITING_FOR_ASSIGNMENT' && booking.status !== 'PENDING') {
+      return res.status(400).json({ error: 'This booking has already been reviewed.' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'CONFIRMED',
+        labReviewedAt: new Date(),
+        labReviewedById: req.user.id,
+      },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: 'CONFIRMED',
+        note: 'Lab Visit booking accepted by Lab Admin',
+        updatedBy: req.user.id,
+      },
+    });
+
+    sendNotificationToUser(
+      booking.userId,
+      'Booking Accepted',
+      'Your lab visit booking has been accepted. Please visit the lab at your scheduled slot.',
+      'BOOKING_ACCEPTED',
+      { bookingId: id }
+    ).catch(console.error);
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Failed to accept lab booking:', error);
+    res.status(500).json({ error: 'Failed to accept booking', details: error.message });
+  }
+};
+
+export const rejectLabBooking = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only Lab Admin can reject bookings.' });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.collectionMode !== 'LAB') {
+      return res.status(400).json({ error: 'This action is only valid for Lab Visit bookings.' });
+    }
+    if (booking.status !== 'WAITING_FOR_ASSIGNMENT' && booking.status !== 'PENDING') {
+      return res.status(400).json({ error: 'This booking has already been reviewed.' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: reason || 'Not specified',
+        labReviewedAt: new Date(),
+        labReviewedById: req.user.id,
+      },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: 'REJECTED',
+        note: reason || 'Booking rejected by Lab Admin',
+        updatedBy: req.user.id,
+      },
+    });
+
+    sendNotificationToUser(
+      booking.userId,
+      'Booking Rejected',
+      reason ? `Your lab visit booking was rejected: ${reason}` : 'Your lab visit booking was rejected by the lab.',
+      'BOOKING_REJECTED',
+      { bookingId: id }
+    ).catch(console.error);
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Failed to reject lab booking:', error);
+    res.status(500).json({ error: 'Failed to reject booking', details: error.message });
+  }
+};
+
+export const patientReachedLab = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.collectionMode !== 'LAB') {
+      return res.status(400).json({ error: 'Only valid for Lab Visit bookings.' });
+    }
+    if (booking.status !== 'CONFIRMED') {
+      return res.status(400).json({ error: 'Booking must be CONFIRMED before patient can mark arrival.' });
+    }
+    if (booking.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Only the booking owner can mark arrival.' });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: 'PATIENT_REACHED_LAB' },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: 'PATIENT_REACHED_LAB',
+        note: 'Patient marked arrival at the lab',
+        updatedBy: req.user.id,
+      },
+    });
+
+    const admins = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'] } },
+      select: { id: true },
+    });
+    const adminIds = admins.map(a => a.id);
+    if (adminIds.length > 0) {
+      sendNotificationToMultipleUsers(
+        adminIds,
+        'Patient Reached Lab',
+        `Patient has arrived at the lab for booking ${booking.bookingCode}.`,
+        'PATIENT_REACHED_LAB',
+        { bookingId: id }
+      ).catch(console.error);
+    }
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Failed to mark patient reached:', error);
+    res.status(500).json({ error: 'Failed to update status', details: error.message });
+  }
+};
+
+const LAB_STATUS_TRANSITIONS: Record<string, { next: string; label: string }> = {
+  SAMPLE_COLLECTED: { next: 'PROCESSING', label: 'Processing Started' },
+  PROCESSING: { next: 'REPORT_READY', label: 'Report Ready' },
+  REPORT_READY: { next: 'COMPLETED', label: 'Completed' },
+};
+
+const LAB_STATUS_NOTIFICATIONS: Record<string, { title: string; body: string; type: string }> = {
+  SAMPLE_COLLECTED: {
+    title: 'Sample Collected',
+    body: 'Your sample has been collected at the lab.',
+    type: 'SAMPLE_COLLECTED',
+  },
+  PROCESSING: {
+    title: 'Tests in Progress',
+    body: 'Your sample is being processed at the lab.',
+    type: 'PROCESSING',
+  },
+  REPORT_READY: {
+    title: 'Report Ready',
+    body: 'Your diagnostic report is ready. Check the Reports section.',
+    type: 'REPORT_READY',
+  },
+  COMPLETED: {
+    title: 'Booking Completed',
+    body: 'Your lab visit booking has been completed. Thank you for choosing MedSeva.',
+    type: 'BOOKING_COMPLETED',
+  },
+};
+
+export const updateLabStatus = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Only Lab Admin can update lab booking status.' });
+    }
+
+const allowedStatuses = Object.values(LAB_STATUS_TRANSITIONS).map(t => t.next);
+    const upperStatus = status?.toUpperCase();
+    if (!allowedStatuses.includes(upperStatus)) {
+      return res.status(400).json({ error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}` });
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.collectionMode !== 'LAB') {
+      return res.status(400).json({ error: 'Only valid for Lab Visit bookings.' });
+    }
+
+    if (upperStatus === 'SAMPLE_COLLECTED' && booking.paymentStatus !== 'SUCCESS') {
+      return res.status(400).json({ error: 'Payment must be completed before sample can be collected.' });
+    }
+
+    const transition = LAB_STATUS_TRANSITIONS[booking.status];
+    if (!transition || transition.next !== upperStatus) {
+      return res.status(400).json({
+        error: `Cannot move from ${booking.status} to ${upperStatus}. Expected next: ${transition?.next || 'N/A'}`,
+      });
+    }
+
+    const updated = await prisma.booking.update({
+      where: { id },
+      data: { status: upperStatus as any },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: upperStatus as any,
+        note: `${transition.label} — updated by Lab Admin`,
+        updatedBy: req.user.id,
+      },
+    });
+
+    const notif = LAB_STATUS_NOTIFICATIONS[upperStatus];
+    if (notif) {
+  sendNotificationToUser(booking.userId, notif.title, notif.body, notif.type as any, { bookingId: id }).catch(console.error);
+    }
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Failed to update lab status:', error);
+    res.status(500).json({ error: 'Failed to update lab status', details: error.message });
   }
 };
 

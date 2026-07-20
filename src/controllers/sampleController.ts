@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { io } from '../server';
+import { createAuditLog } from '../services/audit.service';
 
 const prisma = new PrismaClient();
 
@@ -106,21 +107,18 @@ export const receiveSample = async (req: any, res: Response) => {
       },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user.id,
-        action: isRejected ? 'SAMPLE_REJECTED' : 'SAMPLE_ACCESSIONED',
-        module: 'lims',
-        details: {
-          bookingId,
-          accessionNumber,
-          condition,
-          sampleType,
-          rejectionReason: isRejected ? rejectionReason : null,
-        },
-      },
+await createAuditLog({
+      userId: req.user.id,
+      action: isRejected ? 'SAMPLE_REJECTED' : 'SAMPLE_ACCESSIONED',
+      module: 'lims',
+      entityType: 'Sample',
+      entityId: sample.id,
+      performedByRole: req.user.role,
+      ipAddress: req.ip,
+      userAgent: req.headers?.['user-agent'] as string,
+      severity: isRejected ? 'HIGH' : 'LOW',
+      metadata: { bookingId, accessionNumber, condition, sampleType, rejectionReason: isRejected ? rejectionReason : null },
     });
-
     const updatedBooking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
@@ -175,15 +173,18 @@ export const startProcessing = async (req: any, res: Response) => {
       },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        userId: req.user.id,
-        action: 'SAMPLE_PROCESSING_STARTED',
-        module: 'lims',
-        details: { bookingId, accessionNumber: booking.sample.accessionNumber },
-      },
+await createAuditLog({
+      userId: req.user.id,
+      action: 'SAMPLE_PROCESSING_STARTED',
+      module: 'lims',
+      entityType: 'Sample',
+      entityId: booking.sample.id,
+      performedByRole: req.user.role,
+      ipAddress: req.ip,
+      userAgent: req.headers?.['user-agent'] as string,
+      severity: 'LOW',
+      metadata: { bookingId, accessionNumber: booking.sample.accessionNumber },
     });
-
     const updatedBooking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {

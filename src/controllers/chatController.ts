@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { sendNotificationToUser } from '../services/notification.service';
 
 const prisma = new PrismaClient();
 
@@ -112,6 +113,15 @@ export const assignConversation = async (req: AuthRequest, res: Response) => {
     await prisma.supportAssignment.create({
       data: { conversationId: id, adminUserId },
     });
+
+const conv = await prisma.conversation.findUnique({
+      where: { id },
+      include: { user: { select: { id: true, name: true } } },
+    });
+
+    if (conv) {
+      sendNotificationToUser(conv.userId, 'Support Agent Assigned', 'A support agent has joined your conversation.', 'SUPPORT_REPLY').catch(console.error);
+    }
 
     res.json(conversation);
   } catch {

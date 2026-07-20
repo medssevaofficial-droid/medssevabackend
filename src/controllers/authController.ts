@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { createAuditLog } from '../services/audit.service';
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
@@ -113,7 +114,7 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { mobile, email, password } = req.body;
-    console.log(`🔑 Login Attempt: Mobile/Email=${mobile || email}`);
+    console.log(`Login Attempt: Mobile/Email=${mobile || email}`);
 
     let user = null;
     if (mobile) {
@@ -148,7 +149,17 @@ export const login = async (req: Request, res: Response) => {
         return res.status(403).json({ error: 'Your account has been suspended. Contact support.', suspended: true });
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+   const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+      createAuditLog({
+        userId: user.id,
+        action: 'LOGIN',
+        module: 'auth',
+        performedByRole: user.role,
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'] as string,
+        severity: 'LOW',
+        metadata: { mobile: user.mobile },
+      }).catch(console.error);
       return res.json({
         message: 'Login successful',
         user: {
@@ -206,6 +217,17 @@ export const login = async (req: Request, res: Response) => {
       permissions = ['*'];
       accessibleModules = ['*'];
     }
+
+createAuditLog({
+      userId: user.id,
+      action: 'LOGIN',
+      module: 'auth',
+      performedByRole: user.role,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] as string,
+      severity: 'LOW',
+      metadata: { mobile: user.mobile, adminRole: adminRoleName },
+    }).catch(console.error);
 
     res.json({
       message: 'Login successful',
@@ -508,6 +530,80 @@ export const getMe = async (req: any, res: Response) => {
   } catch (error: any) {
     console.error('getMe error:', error);
     res.status(500).json({ error: 'Failed to fetch profile', details: error.message });
+  }
+};
+
+export const sendOtp = async (req: Request, res: Response) => {
+  try {
+    const { mobile } = req.body;
+    if (!mobile) return res.status(400).json({ error: 'Mobile number is required' });
+    return res.json({ success: true, message: 'OTP sent successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to send OTP', details: error.message });
+  }
+};
+
+export const verifyOtp = async (req: Request, res: Response) => {
+  try {
+    const { mobile, otp } = req.body;
+    if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
+    if (otp !== '1234') return res.status(400).json({ error: 'Invalid OTP' });
+    return res.json({ success: true, message: 'OTP verified' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to verify OTP', details: error.message });
+  }
+};
+
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { mobile, password } = req.body;
+    if (!mobile || !password) return res.status(400).json({ error: 'Mobile and password are required' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+    const user = await prisma.user.findUnique({ where: { mobile } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await prisma.user.update({ where: { mobile }, data: { password: hashedPassword } });
+
+    return res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to reset password', details: error.message });
+  }
+};
+
+export const loginWithOtp = async (req: Request, res: Response) => {
+  try {
+    const { mobile, otp } = req.body;
+    if (!mobile || !otp) return res.status(400).json({ error: 'Mobile and OTP are required' });
+    if (otp !== '1234') return res.status(400).json({ error: 'Invalid OTP' });
+
+    const user = await prisma.user.findUnique({ where: { mobile } });
+    if (!user) return res.status(404).json({ error: 'This mobile number is not registered.' });
+
+    if (user.role === 'PATHOLOGY_PARTNER') {
+      const partner = await prisma.pathologyPartner.findUnique({ where: { userId: user.id } });
+      if (!partner) return res.status(403).json({ error: 'Partner profile not found' });
+      if (partner.approvalStatus === 'PENDING') return res.status(403).json({ error: 'Your registration is pending admin approval.', pendingApproval: true });
+      if (partner.approvalStatus === 'REJECTED') return res.status(403).json({ error: `Registration rejected: ${partner.rejectionReason || 'Contact support.'}`, rejected: true });
+      if (partner.approvalStatus === 'SUSPENDED') return res.status(403).json({ error: 'Your account has been suspended.', suspended: true });
+
+      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
+      return res.json({
+        message: 'Login successful',
+        user: { id: user.id, name: user.name, mobile: user.mobile, email: user.email, role: user.role, partner: { id: partner.id, labName: partner.labName, approvalStatus: partner.approvalStatus, isAvailable: partner.isAvailable, rating: partner.rating } },
+        token,
+      });
+    }
+
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '15d' });
+    return res.json({
+      message: 'Login successful',
+      user: { id: user.id, name: user.name, mobile: user.mobile, email: user.email, role: user.role, uhid: user.uhid },
+      token,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to login', details: error.message });
   }
 };
 

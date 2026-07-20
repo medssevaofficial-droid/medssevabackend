@@ -1,12 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedTests(prisma: PrismaClient) {
-  console.log('🔄 Seeding tests...');
+  console.log('Seeding tests...');
 
   await prisma.test.createMany({
     skipDuplicates: true,
     data: [
-      // ── BLOOD ──────────────────────────────────────────────────────────
+      // BLOOD 
       {
         name: 'Complete Blood Count (CBC)',
         description: '24 parameters: RBC, WBC, Hb, Platelets, Differential.',
@@ -54,7 +54,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'Crucial test before a blood transfusion, surgery, or during pregnancy.',
       },
 
-      // ── DIABETES ───────────────────────────────────────────────────────
+      // DIABETES
       {
         name: 'Blood Sugar Fasting',
         description: 'Glucose after 8–12 hr fast.',
@@ -94,7 +94,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'Helps evaluate insulin resistance, key in the development of type 2 diabetes.',
       },
 
-      // ── THYROID ────────────────────────────────────────────────────────
+      // THYROID 
       {
         name: 'Thyroid Profile T3/T4/TSH',
         description: 'Complete thyroid hormone assessment.',
@@ -133,7 +133,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'Used to diagnose Hashimoto\'s disease and other autoimmune thyroid disorders.',
       },
 
-      // ── CARDIAC ────────────────────────────────────────────────────────
+      // CARDIAC
       {
         name: 'Lipid Profile (7 param)',
         description: 'Cholesterol, HDL, LDL, VLDL, Triglycerides, CRI.',
@@ -163,7 +163,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'High-sensitivity CRP measures inflammation linked to higher risk of heart disease.',
       },
 
-      // ── LIVER ──────────────────────────────────────────────────────────
+      // LIVER
       {
         name: 'Liver Function Test (LFT)',
         description: 'Measures liver enzymes and bilirubin.',
@@ -202,7 +202,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'Crucial screening test to determine active Hepatitis B infection.',
       },
 
-      // ── VITAMINS ───────────────────────────────────────────────────────
+      // VITAMINS 
       {
         name: 'Vitamin D Total (25-OH)',
         description: 'Bone health & immunity. Common deficiency.',
@@ -242,7 +242,7 @@ export async function seedTests(prisma: PrismaClient) {
         whyRequired: 'Used to screen for conditions related to bones, heart, nerves, and kidneys.',
       },
 
-      // ── FEVER ──────────────────────────────────────────────────────────
+      // FEVER 
       {
         name: 'Dengue Duo NS1+IgG+IgM',
         description: '3-in-1 Dengue — NS1 antigen + IgG + IgM antibodies.',
@@ -294,5 +294,5 @@ export async function seedTests(prisma: PrismaClient) {
     ],
   });
 
-  console.log('✅ Tests seeded (29 tests across 7 categories)');
+  console.log('Tests seeded (29 tests across 7 categories)');
 }

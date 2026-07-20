@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedCoupons(prisma: PrismaClient) {
-  console.log('🔄 Seeding coupons...');
+  console.log('Seeding coupons...');
 
   await prisma.coupon.createMany({
     skipDuplicates: true,
@@ -37,5 +37,5 @@ export async function seedCoupons(prisma: PrismaClient) {
     ],
   });
 
-  console.log('✅ Coupons seeded');
+  console.log('Coupons seeded');
 }

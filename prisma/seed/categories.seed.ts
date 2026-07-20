@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
 export async function seedCategories(prisma: PrismaClient) {
-  console.log('📁 Seeding test categories...');
+  console.log('Seeding test categories...');
 
 await prisma.packageTest.deleteMany();
   await prisma.bookingTest.deleteMany();
@@ -21,5 +21,5 @@ await prisma.packageTest.deleteMany();
     { id: 'fever', name: 'Fever & Infection', iconName: 'thermometer', slug: 'fever', testCount: '5+', displayOrder: 8 },
   ];
   await prisma.testCategory.createMany({ data: categoriesData });
-  console.log(`✅ ${categoriesData.length} categories created`);
+  console.log(`${categoriesData.length} categories created`);
 }

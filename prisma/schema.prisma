@@ -22,7 +22,7 @@ model User {
   bookings            Booking[]
   familyMembers       Family[]
   paymentMethods      PaymentMethod[]
-  verifiedReports     Report[]        @relation("ReportVerifier")
+verifiedReports     Report[]        @relation("ReportVerifier")
   paymentsReceived    Booking[]       @relation("PaymentReceiver")
   assignedCollections Booking[]       @relation("AssignedExecutive")
   prescriptions       Prescription[]
@@ -30,6 +30,8 @@ model User {
   auditLogs           AuditLog[]
   pathologyPartner    PathologyPartner?
   conversations       Conversation[]
+  deviceTokens        DeviceToken[]
+  notifications       Notification[]
 }
 model City {
   id        String   @id @default(uuid())
@@ -197,6 +199,9 @@ assignedExecutiveId  String?
 partnerNote          String?
   collectionOtp        String?
   otpVerified          Boolean             @default(false)
+  rejectionReason      String?
+  labReviewedAt        DateTime?
+  labReviewedById      String?
   createdAt            DateTime            @default(now())
   user                 User                @relation(fields: [userId], references: [id])
   branch               Branch?             @relation(fields: [branchId], references: [id])
@@ -353,15 +358,49 @@ model AdminUser {
   supportAssignments SupportAssignment[]
 }
 model AuditLog {
-  id        String   @id @default(uuid())
-  userId    String
-  action    String
-  module    String
-  details   Json?
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+  id              String   @id @default(uuid())
+  userId          String
+  action          String
+  module          String
+  entityType      String?
+  entityId        String?
+  performedByRole String?
+  branchId        String?
+  ipAddress       String?
+  userAgent       String?
+  requestId       String?
+  severity        String   @default("LOW")
+  status          String   @default("SUCCESS")
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([module])
+  @@index([action])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model ApiRequestLog {
+  id           String   @id @default(uuid())
+  method       String
+  path         String
+  statusCode   Int
+  latencyMs    Int
+  ip           String?
+  userId       String?
+  userRole     String?
+  requestId    String?
+  userAgent    String?
+  branchId     String?
+  responseSize Int?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([statusCode])
+  @@index([method])
+  @@index([userId])
 }
 
 enum CollectionMode {
@@ -397,6 +436,8 @@ enum BookingStatus {
   REPORT_READY
   COMPLETED
   CANCELLED
+REJECTED
+  PATIENT_REACHED_LAB
 }
 
 model BookingStatusLog {
@@ -975,6 +1016,30 @@ model CmsPage {
   updatedAt   DateTime @updatedAt
 }
 
+model SystemSettings {
+  id                         String   @id @default("singleton")
+  minimumHomeCollectionAmount Float    @default(0)
+  homeCollectionCharge        Float    @default(0)
+  defaultPartnerCommission    Float    @default(0)
+  labOpenTime                 String   @default("06:00")
+  labCloseTime                String   @default("22:00")
+  reportDeliveryMode          ReportDeliveryMode @default(AUTO_PUSH)
+  currency                    String   @default("INR")
+  timezone                    String   @default("Asia/Kolkata")
+  platformVersion             String   @default("1.0.0")
+  maintenanceMode             Boolean  @default(false)
+  allowBookings               Boolean  @default(true)
+  allowPartnerRegistration    Boolean  @default(true)
+  updatedBy                   String?
+  updatedAt                   DateTime @updatedAt
+  createdAt                   DateTime @default(now())
+}
+
+enum ReportDeliveryMode {
+  AUTO_PUSH
+  MANUAL_DISPATCH
+}
+
 model CmsAuditLog {
   id               String   @id @default(uuid())
   adminId          String?
@@ -984,4 +1049,87 @@ model CmsAuditLog {
   resourceId       String?
   details          Json?
   createdAt        DateTime @default(now())
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, token])
+  @@index([userId])
+}
+
+model Notification {
+  id         String             @id @default(uuid())
+  userId     String
+  title      String
+  body       String
+  type       NotificationType
+  data       Json?
+  isRead     Boolean            @default(false)
+  readAt     DateTime?
+  deepLink   String?
+  createdAt  DateTime           @default(now())
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+model NotificationLog {
+  id          String              @id @default(uuid())
+  userId      String?
+  title       String
+  body        String
+  type        NotificationType
+  status      NotificationStatus  @default(PENDING)
+  fcmResponse Json?
+  error       String?
+  retryCount  Int                 @default(0)
+  sentAt      DateTime?
+  createdAt   DateTime            @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  BOOKING_CREATED
+  BOOKING_ACCEPTED
+  BOOKING_REJECTED
+  BOOKING_CANCELLED
+  BOOKING_RESCHEDULED
+  PARTNER_ON_THE_WAY
+  PARTNER_ARRIVED
+  SAMPLE_COLLECTED
+  SAMPLE_RECEIVED_IN_LAB
+  REPORT_READY
+  REPORT_SENT
+  REPORT_APPROVED
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+ NEW_BOOKING_ASSIGNED
+  BOOKING_CANCELLED_BY_USER
+  PATIENT_REACHED_LAB
+  BOOKING_COMPLETED
+  NEW_CHAT_MESSAGE
+  SUPPORT_REPLY
+  NEW_OFFER
+  NEW_PACKAGE
+  PRICE_UPDATE
+  APPOINTMENT_REMINDER
+  MISSED_APPOINTMENT
+  BROADCAST
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
 }

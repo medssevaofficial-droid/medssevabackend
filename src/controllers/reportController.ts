@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { autoConsumeForTest } from './inventoryController';
+import { sendNotificationToUser } from '../services/notification.service';
 
 const prisma = new PrismaClient();
 
@@ -240,7 +241,7 @@ export const finalizeReport = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Report is already finalized' });
     }
 
-    const finalized = await prisma.report.update({
+const finalized = await prisma.report.update({
       where: { id },
       data: {
         status: 'APPROVED',
@@ -257,22 +258,29 @@ export const finalizeReport = async (req: AuthRequest, res: Response) => {
       include: { parameters: true, auditLogs: true, booking: true },
     });
 
-await prisma.booking.update({
+    await prisma.booking.update({
       where: { id: report.bookingId },
       data: { status: 'REPORT_READY' },
     });
 
-    const booking = await prisma.booking.findUnique({
+sendNotificationToUser(
+      finalized.booking.userId,
+      'Report Ready',
+      'Your diagnostic report is ready. Tap to view.',
+      'REPORT_READY',
+      { bookingId: report.bookingId }
+    ).catch(console.error);
+
+    const bookingWithTests = await prisma.booking.findUnique({
       where: { id: report.bookingId },
       include: { tests: true },
     });
 
-    if (booking?.tests?.length) {
-      for (const bt of booking.tests) {
+    if (bookingWithTests?.tests?.length) {
+      for (const bt of bookingWithTests.tests) {
         await autoConsumeForTest(bt.testId, finalized.booking.bookingCode, req.user?.id);
       }
     }
-
     res.json(finalized);
   } catch (error: any) {
     console.error('Failed to finalize report:', error);
@@ -326,10 +334,18 @@ export const sendReport = async (req: AuthRequest, res: Response) => {
       },
     });
 
-    await prisma.booking.update({
+ await prisma.booking.update({
       where: { id: report.bookingId },
       data: { status: 'COMPLETED' },
     });
+
+    sendNotificationToUser(
+      released.booking.userId,
+      'Report Sent',
+      'Your report has been sent. You can download it from the Reports tab.',
+      'REPORT_SENT',
+      { bookingId: report.bookingId }
+    ).catch(console.error);
 
     res.json(released);
   } catch (error: any) {
