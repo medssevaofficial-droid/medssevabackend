@@ -21,12 +21,12 @@ export const createBranch = async (req: any, res: Response) => {
     if (req.user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Only Admin can create branches.' });
     }
-    const { name, line1, city, state, pincode, hours } = req.body;
-    if (!name || !line1 || !city || !state || !pincode) {
-      return res.status(400).json({ error: 'name, line1, city, state, pincode are required.' });
+const { name, code, line1, city, state, pincode, workingHours } = req.body;
+    if (!name || !code || !line1 || !city || !state || !pincode) {
+      return res.status(400).json({ error: 'name, code, line1, city, state, pincode are required.' });
     }
     const branch = await prisma.branch.create({
-      data: { name, line1, city, state, pincode, hours },
+      data: { name, code, line1, city, state, pincode, workingHours },
     });
     res.status(201).json(branch);
   } catch (error: any) {
@@ -41,10 +41,10 @@ export const updateBranch = async (req: any, res: Response) => {
       return res.status(403).json({ error: 'Only Admin can update branches.' });
     }
     const { id } = req.params;
-    const { name, line1, city, state, pincode, hours, isActive } = req.body;
+ const { name, line1, city, state, pincode, workingHours, isActive } = req.body;
     const branch = await prisma.branch.update({
       where: { id },
-      data: { name, line1, city, state, pincode, hours, isActive },
+      data: { name, line1, city, state, pincode, workingHours, isActive },
     });
     res.json(branch);
   } catch (error: any) {
