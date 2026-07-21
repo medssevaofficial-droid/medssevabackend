@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
+import { uploadToCloudinary, cloudinary } from '../middlewares/upload';
 
 const prisma = new PrismaClient();
-
 // Utility to generate a random 8-digit UHID (e.g., 9482-1029)
 const generateUHID = () => {
   const part1 = Math.floor(1000 + Math.random() * 9000);
@@ -41,13 +41,22 @@ export const getMe = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    res.json(user);
+res.json({
+      id: user.id,
+      name: user.name,
+      mobile: user.mobile,
+      email: user.email,
+      role: user.role,
+      uhid: user.uhid,
+      avatarUrl: user.avatarUrl ?? null,
+      healthScore: user.healthScore,
+      familyMembers: user.familyMembers,
+    });
   } catch (error: any) {
     console.error('Error fetching user profile:', error);
     res.status(500).json({ error: 'Failed to fetch user profile', details: error.message });
   }
 };
-
 export const addFamilyMember = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
@@ -110,6 +119,59 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
     }
     console.error('Error updating user profile:', error);
     res.status(500).json({ error: 'Failed to update profile', details: error.message });
+  }
+};
+
+export const uploadAvatar = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No image file provided.' });
+    }
+
+    const allowedMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedMime.includes(req.file.mimetype)) {
+      return res.status(400).json({ error: 'Invalid file type. Only JPG, PNG, and WEBP images are allowed.' });
+    }
+
+    const maxSize = 5 * 1024 * 1024;
+    if (req.file.size > maxSize) {
+      return res.status(400).json({ error: 'Image too large. Maximum size is 5MB.' });
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser) return res.status(404).json({ error: 'User not found.' });
+
+    if (existingUser.avatarUrl) {
+      try {
+        const publicIdMatch = existingUser.avatarUrl.match(/medseva\/avatars\/[^.]+/);
+        if (publicIdMatch) {
+          await cloudinary.uploader.destroy(publicIdMatch[0]);
+        }
+      } catch {
+      }
+    }
+
+const { secure_url } = await uploadToCloudinary(
+      req.file.buffer,
+      `avatar_${userId}_${Date.now()}.${req.file.mimetype.split('/')[1]}`,
+      req.file.mimetype,
+      'medseva/avatars'
+    );
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { avatarUrl: secure_url },
+    });
+
+    res.json({
+      avatarUrl: updated.avatarUrl,
+      message: 'Profile image updated successfully.',
+    });
+  } catch (error: any) {
+    console.error('Avatar upload error:', error);
+    res.status(500).json({ error: 'Failed to upload profile image.', details: error.message });
   }
 };
 

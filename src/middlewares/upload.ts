@@ -41,7 +41,23 @@ export const prescriptionUpload = multer({
   fileFilter,
 }).single('file');
 
-export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeType: string): Promise<{ secure_url: string; public_id: string }> => {
+const avatarFileFilter = (req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const ext = file.originalname.split('.').pop()?.toLowerCase() || '';
+  const allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
+  if (!allowedMime.includes(file.mimetype) || !allowedExt.includes(ext)) {
+    return cb(new Error('INVALID_FILE_TYPE:Only JPG, PNG, and WEBP images are allowed for profile photos.'));
+  }
+  cb(null, true);
+};
+
+export const avatarUpload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: avatarFileFilter,
+}).single('avatar');
+
+export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeType: string, folder = 'medseva/prescriptions'): Promise<{ secure_url: string; public_id: string }> => {
   return new Promise((resolve, reject) => {
     const ext = originalName.split('.').pop()?.toLowerCase() || 'bin';
     const isImage = ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
@@ -49,7 +65,7 @@ export const uploadToCloudinary = (buffer: Buffer, originalName: string, mimeTyp
 
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        folder: 'medseva/prescriptions',
+        folder,
         resource_type: resourceType,
         use_filename: true,
         unique_filename: true,
