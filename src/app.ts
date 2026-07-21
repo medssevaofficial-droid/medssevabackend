@@ -31,6 +31,7 @@ import settingsRoutes from './routes/settingsRoutes';
 
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(cors());
 
 const rawBodyMiddleware = express.raw({ type: 'application/json' });
