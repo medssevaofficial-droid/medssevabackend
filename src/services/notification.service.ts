@@ -1,8 +1,6 @@
 import { PrismaClient, NotificationType, NotificationStatus } from '@prisma/client';
 import { google } from 'googleapis';
 import axios from 'axios';
-import path from 'path';
-import fs from 'fs';
 
 const prisma = new PrismaClient();
 
@@ -83,19 +81,18 @@ const getDeepLink = (type: NotificationType, data?: Record<string, any>): string
 };
 
 const getAccessToken = async (): Promise<string> => {
-  const serviceAccountPath = path.resolve(process.cwd(), 'serviceAccountKey.json');
-  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-
   const auth = new google.auth.GoogleAuth({
-    credentials: serviceAccount,
+    credentials: {
+      project_id: process.env.FIREBASE_PROJECT_ID,
+      client_email: process.env.FIREBASE_CLIENT_EMAIL,
+      private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    },
     scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
   });
-
   const client = await auth.getClient();
   const tokenResponse = await client.getAccessToken();
   return tokenResponse.token as string;
 };
-
 const sendFcmToToken = async (
   fcmToken: string,
   title: string,
@@ -104,9 +101,7 @@ const sendFcmToToken = async (
   data?: Record<string, any>
 ): Promise<{ success: boolean; response?: any; error?: string }> => {
   try {
-    const serviceAccountPath = path.resolve(process.cwd(), 'serviceAccountKey.json');
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-    const projectId = serviceAccount.project_id;
+    const projectId = process.env.FIREBASE_PROJECT_ID!;
 
     const accessToken = await getAccessToken();
     const channel = CHANNEL_MAP[type] || 'general';
