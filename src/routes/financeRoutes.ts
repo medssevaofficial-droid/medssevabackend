@@ -20,6 +20,10 @@ const router = Router();
 
 router.post('/webhook/razorpay', handleRazorpayWebhook);
 
+router.get('/config', (req, res) => {
+  res.json({ keyId: process.env.RAZORPAY_KEY_ID });
+});
+
 router.use(authenticate);
 
 router.get('/payment-summary', getPaymentSummary);

@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { randomUUID } from 'crypto';
 
-const prisma = new PrismaClient();
+
 
 const SKIP_PATHS = ['/api/health', '/api/bookings/webhook', '/api/finance/webhook'];
 

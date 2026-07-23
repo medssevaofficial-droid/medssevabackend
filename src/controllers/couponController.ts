@@ -1,8 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
-
+import { prisma } from '../lib/prisma';
 const getIp = (req: Request): string =>
   (req.headers['x-forwarded-for'] as string)?.split(',')[0] || req.socket.remoteAddress || '';
 

@@ -1,9 +1,9 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import cloudinary from '../config/cloudinary';
 
-const prisma = new PrismaClient();
+
 
 const logCmsAction = async (
   adminId: string | undefined,

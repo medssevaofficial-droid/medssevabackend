@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { sendNotificationToUser } from '../services/notification.service';
-const prisma = new PrismaClient();
+
 
 // Partner's own assigned bookings (active jobs)
 export const getPartnerBookings = async (req: any, res: Response) => {
@@ -387,28 +387,17 @@ export const collectCash = async (req: any, res: Response) => {
   }
 };
 
-// Initiate UPI collection — creates a Razorpay payment link for the patient to scan
-import Razorpay from 'razorpay';
 export const initiateUpiCollection = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
 
-    // ── 1. Razorpay config guard ───────────────────────────────────────────────
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      console.error('[UPI] Razorpay env vars missing: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
-      return res.status(500).json({ error: 'Razorpay is not configured on the server.' });
+    if (!process.env.RAZORPAY_VPA) {
+      return res.status(500).json({ error: 'RAZORPAY_VPA is not configured in backend .env' });
     }
 
-    const razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET,
-    });
-
-    // ── 2. Partner guard ──────────────────────────────────────────────────────
     const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
     if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
 
-    // ── 3. Booking guard ──────────────────────────────────────────────────────
     const booking = await prisma.booking.findUnique({ where: { id }, include: { user: true } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
     if (booking.assignedPartnerId !== partner.id) {
@@ -421,94 +410,43 @@ export const initiateUpiCollection = async (req: any, res: Response) => {
       return res.status(400).json({ error: 'Payment has already been collected.' });
     }
 
-    // ── 4. Amount guard ───────────────────────────────────────────────────────
     const amountPaise = Math.round(Number(booking.totalPaid) * 100);
     if (!amountPaise || amountPaise <= 0) {
-      console.error(`[UPI] Invalid amount for booking ${id}: totalPaid=${booking.totalPaid}`);
       return res.status(400).json({ error: 'Booking has an invalid payment amount.' });
     }
 
-    // ── 5. Reuse existing unexpired link ──────────────────────────────────────
-    if ((booking as any).paymentLinkId) {
-      try {
-        const existing = await razorpay.paymentLink.fetch((booking as any).paymentLinkId);
-        if (existing.status !== 'paid' && existing.status !== 'expired' && existing.status !== 'cancelled') {
-          console.log(`[UPI] Reusing existing payment link ${(booking as any).paymentLinkId} (status: ${existing.status})`);
-          return res.json({
-            paymentLinkId: (booking as any).paymentLinkId,
-            paymentLinkUrl: (booking as any).paymentLinkUrl,
-          });
-        }
-        console.log(`[UPI] Existing link status is "${existing.status}" — creating a new one.`);
-      } catch (fetchErr: any) {
-        // If fetch fails (e.g. stale ID), log and fall through to create a fresh link
-        console.warn(`[UPI] Could not fetch existing payment link: ${fetchErr?.message}`);
-      }
-    }
+    const upiString = `upi://pay?pa=${encodeURIComponent(process.env.RAZORPAY_VPA)}&pn=${encodeURIComponent('MedSeva')}&am=${booking.totalPaid.toFixed(2)}&cu=INR&tn=${encodeURIComponent(`Booking #${booking.bookingCode}`)}`;
 
-    // ── 6. Create new Razorpay payment link ───────────────────────────────────
-    console.log(`[UPI] Creating payment link for booking ${id}, amount=${amountPaise} paise`);
-    let link: any;
-    try {
-      link = await razorpay.paymentLink.create({
-        amount: amountPaise,
-        currency: 'INR',
-        description: `MedsSeva Booking #${booking.bookingCode}`,
-        customer: {
-          name: booking.patientName,
-          contact: booking.user?.mobile ?? '',
+    const invoiceNumber = `INV-${Date.now()}-${booking.bookingCode}`;
+    const existingPayment = await prisma.payment.findUnique({ where: { bookingId: id } });
+    if (!existingPayment) {
+      await prisma.payment.create({
+        data: {
+          bookingId: id,
+          amount: booking.totalPaid,
+          invoiceNumber,
+          status: 'PENDING',
         },
-        notify: { sms: false, email: false },
-       expire_by: Math.floor(Date.now() / 1000) + 20 * 60, // 20 minutes (Razorpay minimum is 15)
-      });
-    } catch (razorpayErr: any) {
-      // Surface Razorpay's own error message clearly
-      const rzpMsg =
-        razorpayErr?.error?.description ||
-        razorpayErr?.message ||
-        'Unknown Razorpay error';
-      console.error(`[UPI] Razorpay paymentLink.create failed: ${rzpMsg}`, razorpayErr);
-      return res.status(502).json({
-        error: 'Could not create UPI payment link via Razorpay.',
-        details: rzpMsg,
       });
     }
 
-    // ── 7. Persist link on booking (graceful if columns don't exist yet) ──────
-    try {
-      await (prisma.booking as any).update({
-        where: { id },
-        data: { paymentLinkId: link.id, paymentLinkUrl: link.short_url },
-      });
-    } catch (dbErr: any) {
-      // Non-fatal — link was created, we just can't reuse it next time
-      console.warn(`[UPI] Could not persist paymentLinkId on booking ${id}: ${dbErr?.message}`);
-      console.warn('[UPI] Run: npx prisma migrate dev --name add_payment_link_fields');
-    }
-
-    console.log(`[UPI] Payment link created: ${link.short_url}`);
-    res.json({ paymentLinkId: link.id, paymentLinkUrl: link.short_url });
-
+    res.json({
+      upiString,
+      amount: booking.totalPaid,
+      bookingCode: booking.bookingCode,
+      patientName: booking.patientName,
+    });
   } catch (error: any) {
-    console.error('[UPI] Unexpected error in initiateUpiCollection:', error);
     res.status(500).json({
       error: 'Failed to initiate UPI collection',
       details: error?.message ?? 'Unknown error',
     });
   }
 };
-// Poll UPI payment status — partner app calls this every few seconds
+
 export const checkUpiPaymentStatus = async (req: any, res: Response) => {
   try {
     const { id } = req.params;
-
-    const razorpay = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
-      ? new Razorpay({ key_id: process.env.RAZORPAY_KEY_ID, key_secret: process.env.RAZORPAY_KEY_SECRET })
-      : null;
-
-    if (!razorpay) {
-      return res.status(500).json({ error: 'Razorpay is not configured on the server.' });
-    }
 
     const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
     if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
@@ -519,55 +457,82 @@ export const checkUpiPaymentStatus = async (req: any, res: Response) => {
       return res.status(403).json({ error: 'Not your booking.' });
     }
 
-    // Already paid — short-circuit
     if (booking.paymentStatus === 'SUCCESS') {
       return res.json({ paymentStatus: 'SUCCESS' });
     }
 
-    if (!booking.paymentLinkId) {
-      return res.status(400).json({ error: 'No UPI payment link found for this booking.' });
-    }
-
-    const link = await razorpay.paymentLink.fetch(booking.paymentLinkId);
-
-    if (link.status === 'paid') {
-      await prisma.booking.update({
-        where: { id },
-        data: {
-          paymentStatus: 'SUCCESS',
-          paymentMode: 'UPI',
-          paymentReceivedAt: new Date(),
-          paymentReceivedById: req.user.id,
-        },
-      });
-
-      await prisma.bookingStatusLog.create({
-        data: {
-          bookingId: id,
-          status: booking.status as any,
-          note: 'UPI payment received via Razorpay QR',
-          updatedBy: req.user.id,
-        }
-      });
-
-      return res.json({ paymentStatus: 'SUCCESS' });
-    }
-
-    // Map Razorpay link statuses to useful messages
-    const statusMessages: Record<string, string> = {
-      created: 'Waiting for patient to scan and pay.',
-      partially_paid: 'Partial payment received. Full amount required.',
-      expired: 'Payment link expired. Please generate a new one.',
-      cancelled: 'Payment was cancelled.',
-    };
-
-    res.json({
-      paymentStatus: 'PENDING',
-      razorpayStatus: link.status,
-      message: statusMessages[link.status] || 'Payment pending.',
-    });
+    res.json({ paymentStatus: 'PENDING', message: 'Waiting for patient to scan and pay.' });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to check UPI payment status', details: error.message });
+  }
+};
+export const verifyUpiPayment = async (req: any, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ error: 'razorpay_order_id, razorpay_payment_id, and razorpay_signature are required.' });
+    }
+
+    const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });
+    if (!partner) return res.status(404).json({ error: 'Partner profile not found.' });
+
+    const booking = await prisma.booking.findUnique({ where: { id } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.assignedPartnerId !== partner.id) {
+      return res.status(403).json({ error: 'This booking is not assigned to you.' });
+    }
+    if (booking.paymentStatus === 'SUCCESS') {
+      return res.json({ success: true, paymentStatus: 'SUCCESS' });
+    }
+
+    const crypto = require('crypto');
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET!)
+      .update(body)
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({ error: 'Invalid payment signature.' });
+    }
+
+    await prisma.payment.updateMany({
+      where: { bookingId: id },
+      data: {
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        status: 'CAPTURED',
+        method: 'upi',
+        paidAt: new Date(),
+        webhookVerified: false,
+      },
+    });
+
+    await prisma.booking.update({
+      where: { id },
+      data: {
+        paymentStatus: 'SUCCESS',
+        paymentMode: 'UPI',
+        paymentId: razorpay_payment_id,
+        paymentReceivedAt: new Date(),
+        paymentReceivedById: req.user.id,
+      },
+    });
+
+    await prisma.bookingStatusLog.create({
+      data: {
+        bookingId: id,
+        status: booking.status as any,
+        note: 'UPI payment verified and received via partner app',
+        updatedBy: req.user.id,
+      },
+    });
+
+    res.json({ success: true, paymentStatus: 'SUCCESS' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to verify UPI payment', details: error.message });
   }
 };
 
@@ -700,6 +665,157 @@ export const getPartnerHistory = async (req: any, res: Response) => {
   }
 };
 
+export const updatePartnerProfile = async (req: any, res: Response) => {
+  try {
+    const { name, address, city, state, pincode } = req.body;
+    const updateData: any = {};
+    if (address !== undefined) updateData.address = address;
+    if (city !== undefined) updateData.city = city;
+    if (state !== undefined) updateData.state = state;
+    if (pincode !== undefined) updateData.pincode = pincode;
+
+    const userUpdateData: any = {};
+    if (name !== undefined) userUpdateData.name = name;
+
+    const [partner] = await Promise.all([
+      prisma.pathologyPartner.update({
+        where: { userId: req.user.id },
+        data: updateData,
+        include: { user: { select: { name: true, email: true, mobile: true, avatarUrl: true } } },
+      }),
+      Object.keys(userUpdateData).length > 0
+        ? prisma.user.update({ where: { id: req.user.id }, data: userUpdateData })
+        : Promise.resolve(),
+    ]);
+
+    res.json({
+      ...partner,
+      name: partner.user.name,
+      email: partner.user.email,
+      mobile: partner.user.mobile,
+      avatarUrl: partner.user.avatarUrl,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update profile', details: error.message });
+  }
+};
+
+export const getPartnerAvailability = async (req: any, res: Response) => {
+  try {
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { userId: req.user.id },
+    });
+    if (!partner) return res.status(404).json({ error: 'Partner not found.' });
+    res.json({
+      isAvailable: partner.isAvailable,
+      availability: (partner as any).availability || null,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch availability', details: error.message });
+  }
+};
+
+export const updateAvailabilitySchedule = async (req: any, res: Response) => {
+  try {
+    const { isAvailable, availability } = req.body;
+    const data: any = {};
+    if (typeof isAvailable === 'boolean') data.isAvailable = isAvailable;
+    if (availability !== undefined) data.availability = availability;
+
+    const partner = await prisma.pathologyPartner.update({
+      where: { userId: req.user.id },
+      data,
+    });
+    res.json({ isAvailable: partner.isAvailable, availability: (partner as any).availability });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update availability', details: error.message });
+  }
+};
+
+export const getPartnerBranch = async (req: any, res: Response) => {
+  try {
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { userId: req.user.id },
+    });
+    if (!partner || !partner.branchId) {
+      return res.json(null);
+    }
+    const branch = await prisma.branch.findUnique({
+      where: { id: partner.branchId },
+    });
+    res.json(branch);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch branch', details: error.message });
+  }
+};
+
+export const getPartnerRatings = async (req: any, res: Response) => {
+  try {
+    const partner = await prisma.pathologyPartner.findUnique({
+      where: { userId: req.user.id },
+    });
+    if (!partner) return res.status(404).json({ error: 'Partner not found.' });
+
+    const [totalAssigned, completedBookings, deliveredBookings] = await Promise.all([
+      prisma.booking.count({
+        where: { assignedPartnerId: partner.id },
+      }),
+      prisma.booking.count({
+        where: {
+          assignedPartnerId: partner.id,
+          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED'] },
+        },
+      }),
+      prisma.booking.findMany({
+        where: {
+          assignedPartnerId: partner.id,
+          status: { in: ['DELIVERED_TO_LAB', 'PROCESSING', 'REPORT_READY', 'COMPLETED'] },
+          collectionStartedAt: { not: null },
+          sampleCollectedAt: { not: null },
+        },
+        select: {
+          collectionStartedAt: true,
+          sampleCollectedAt: true,
+        },
+        take: 100,
+      }),
+    ]);
+
+    const successRate = totalAssigned > 0
+      ? Math.round((completedBookings / totalAssigned) * 100)
+      : 0;
+
+    let averageArrivalTime = 'N/A';
+    if (deliveredBookings.length > 0) {
+      const totalMinutes = deliveredBookings.reduce((sum, b) => {
+        const diff = new Date(b.sampleCollectedAt!).getTime() - new Date(b.collectionStartedAt!).getTime();
+        return sum + Math.round(diff / 60000);
+      }, 0);
+      const avg = Math.round(totalMinutes / deliveredBookings.length);
+      averageArrivalTime = avg < 60 ? `${avg} min` : `${Math.floor(avg / 60)}h ${avg % 60}m`;
+    }
+
+    const ratingScore = partner.rating ?? 0;
+    const breakdown: Record<number, number> = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    if (ratingScore > 0 && completedBookings > 0) {
+      const rounded = Math.round(ratingScore);
+      const clamped = Math.min(5, Math.max(1, rounded));
+      breakdown[clamped] = completedBookings;
+    }
+
+    res.json({
+      overallRating: ratingScore,
+      totalReviews: completedBookings,
+      totalCollections: partner.totalCollections,
+      collectionSuccessRate: successRate,
+      averageArrivalTime,
+      breakdown,
+      reviews: [],
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch ratings', details: error.message });
+  }
+};
 export const getPartnerStats = async (req: any, res: Response) => {
   try {
     const partner = await prisma.pathologyPartner.findUnique({ where: { userId: req.user.id } });

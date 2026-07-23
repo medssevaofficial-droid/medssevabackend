@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { PrismaClient, ReportDeliveryMode } from '@prisma/client';
+import { ReportDeliveryMode } from '@prisma/client';
 import { logAudit } from '../utils/auditLogger';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 const getOrCreateSettings = async () => {
   let settings = await prisma.systemSettings.findUnique({ where: { id: 'singleton' } });

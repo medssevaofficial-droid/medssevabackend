@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { prisma } from '../lib/prisma';
 import jwt from 'jsonwebtoken';
 import { createAuditLog } from '../services/audit.service';
 
-const prisma = new PrismaClient();
+
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
 export const registerPartner = async (req: Request, res: Response) => {

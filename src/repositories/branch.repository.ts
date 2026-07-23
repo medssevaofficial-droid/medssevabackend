@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export const branchRepository = {
   findAll: async (filters?: { isActive?: boolean; homeCollection?: boolean; labVisit?: boolean }) => {

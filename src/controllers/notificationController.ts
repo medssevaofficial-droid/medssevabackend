@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import {
   sendNotificationToUser,
@@ -9,7 +9,7 @@ import {
   retryFailedNotifications,
 } from '../services/notification.service';
 
-const prisma = new PrismaClient();
+
 
 export const registerToken = async (req: AuthRequest, res: Response) => {
   try {

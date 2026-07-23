@@ -1,9 +1,9 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { uploadToCloudinary, cloudinary } from '../middlewares/upload';
 
-const prisma = new PrismaClient();
+
 // Utility to generate a random 8-digit UHID (e.g., 9482-1029)
 const generateUHID = () => {
   const part1 = Math.floor(1000 + Math.random() * 9000);
@@ -50,6 +50,10 @@ res.json({
       uhid: user.uhid,
       avatarUrl: user.avatarUrl ?? null,
       healthScore: user.healthScore,
+      dob: user.dob ?? null,
+      gender: user.gender ?? null,
+      bloodGroup: user.bloodGroup ?? null,
+      altMobile: user.altMobile ?? null,
       familyMembers: user.familyMembers,
     });
   } catch (error: any) {
@@ -90,15 +94,34 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { name, email } = req.body;
+const { name, email, dob, gender, bloodGroup, altMobile } = req.body;
 
-    // Only allow updating safe profile fields — mobile is identity, not editable here
-    const updateData: { name?: string; email?: string } = {};
+    const updateData: {
+      name?: string;
+      email?: string;
+      dob?: string;
+      gender?: string;
+      bloodGroup?: string;
+      altMobile?: string;
+    } = {};
+
     if (name && typeof name === 'string' && name.trim().length > 1) {
       updateData.name = name.trim();
     }
     if (email && typeof email === 'string' && email.includes('@')) {
       updateData.email = email.trim().toLowerCase();
+    }
+    if (dob && typeof dob === 'string') {
+      updateData.dob = dob.trim();
+    }
+    if (gender && typeof gender === 'string') {
+      updateData.gender = gender.trim();
+    }
+    if (bloodGroup && typeof bloodGroup === 'string') {
+      updateData.bloodGroup = bloodGroup.trim();
+    }
+    if (altMobile !== undefined) {
+      updateData.altMobile = altMobile ? altMobile.trim() : '';
     }
 
     if (Object.keys(updateData).length === 0) {

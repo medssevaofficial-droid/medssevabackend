@@ -1,8 +1,6 @@
-import { PrismaClient, PrescriptionStatus } from '@prisma/client';
-import { cloudinary } from '../middlewares/upload';
-
-const prisma = new PrismaClient();
-
+import { PrescriptionStatus } from '@prisma/client';
+import { cloudinary } from '../config/cloudinary';
+import { prisma } from '../lib/prisma';
 export const prescriptionService = {
   async create(data: {
     userId: string;

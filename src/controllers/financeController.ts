@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
-const prisma = new PrismaClient();
+
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID!,
@@ -137,7 +137,7 @@ export const createRazorpayOrder = async (req: Request, res: Response) => {
       },
     });
 
-    res.json({ orderId: order.id, amount: booking.totalPaid, currency: 'INR', paymentId: payment.id, invoiceNumber });
+  res.json({ orderId: order.id, amount: booking.totalPaid, currency: 'INR', keyId: process.env.RAZORPAY_KEY_ID, paymentId: payment.id, invoiceNumber });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to create Razorpay order', details: error.message });
   }
@@ -212,7 +212,7 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
 
     const event = req.body;
 
-    if (event.event === 'payment.captured') {
+if (event.event === 'payment.captured' || event.event === 'payment.authorized') {
       const p = event.payload.payment.entity;
       await prisma.payment.updateMany({
         where: { razorpayOrderId: p.order_id },
@@ -224,14 +224,65 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
           webhookVerified: true,
         },
       });
+      const payment = await prisma.payment.findFirst({ where: { razorpayOrderId: p.order_id } });
+      if (payment) {
+        await prisma.booking.update({
+          where: { id: payment.bookingId },
+          data: { paymentStatus: 'SUCCESS', paymentId: p.id },
+        });
+      }
     }
 
-    if (event.event === 'refund.processed') {
+    if (event.event === 'payment.failed') {
+      const p = event.payload.payment.entity;
+      await prisma.payment.updateMany({
+        where: { razorpayOrderId: p.order_id },
+        data: { status: 'FAILED', webhookVerified: true },
+      });
+    }
+
+    if (event.event === 'order.paid') {
+      const o = event.payload.order.entity;
+      const payment = await prisma.payment.findFirst({ where: { razorpayOrderId: o.id } });
+      if (payment && payment.status !== 'CAPTURED') {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: { status: 'CAPTURED', webhookVerified: true },
+        });
+        await prisma.booking.update({
+          where: { id: payment.bookingId },
+          data: { paymentStatus: 'SUCCESS' },
+        });
+      }
+    }
+
+    if (event.event === 'refund.created' || event.event === 'refund.processed') {
       const r = event.payload.refund.entity;
       await prisma.refund.updateMany({
         where: { razorpayRefundId: r.id },
         data: { status: 'COMPLETED', processedAt: new Date(r.created_at * 1000) },
       });
+    }
+
+    if (event.event === 'payment_link.paid') {
+      const p = event.payload.payment.entity;
+      const payment = await prisma.payment.findFirst({ where: { razorpayOrderId: p.order_id } });
+      if (payment && payment.status !== 'CAPTURED') {
+        await prisma.payment.updateMany({
+          where: { razorpayOrderId: p.order_id },
+          data: {
+            razorpayPaymentId: p.id,
+            status: 'CAPTURED',
+            method: p.method,
+            paidAt: new Date(p.created_at * 1000),
+            webhookVerified: true,
+          },
+        });
+        await prisma.booking.update({
+          where: { id: payment.bookingId },
+          data: { paymentStatus: 'SUCCESS', paymentId: p.id },
+        });
+      }
     }
 
     res.json({ received: true });

@@ -1,18 +1,27 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import Razorpay from 'razorpay';
+import { prisma } from '../lib/prisma';
 import crypto from 'crypto';
 import { sendNotificationToUser, sendNotificationToMultipleUsers } from '../services/notification.service';
 
-const prisma = new PrismaClient();
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID!,
+  key_secret: process.env.RAZORPAY_KEY_SECRET!,
+});
 
-let razorpay: any;
-if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
-  razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-  });
-}
+export const createRazorpayOrder = async (req: Request, res: Response) => {
+  try {
+    const { amount } = req.body;
+    const order = await razorpay.orders.create({
+      amount: Math.round(Number(amount) * 100),
+      currency: 'INR',
+      receipt: `receipt_${Date.now()}`,
+    });
+    res.json(order);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to create Razorpay order', details: error.message });
+  }
+};
 
 // Lab working hours — all possible slots in a day
 const ALL_SLOTS = [
@@ -212,26 +221,6 @@ assignedPartner: {
   }
 };
 
-export const createRazorpayOrder = async (req: Request, res: Response) => {
-  try {
-    if (!razorpay) {
-      throw new Error('Razorpay is not configured. Missing API keys in environment variables.');
-    }
-    const { amount } = req.body;
-
-    const options = {
-      amount: Math.round(Number(amount) * 100), // convert to paise
-      currency: 'INR',
-      receipt: `receipt_${Date.now()}`,
-    };
-
-    const order = await razorpay.orders.create(options);
-    res.json(order);
-  } catch (error: any) {
-    console.error('Error creating Razorpay order:', error);
-    res.status(500).json({ error: 'Failed to create Razorpay order', details: error.message });
-  }
-};
 
 const mapPaymentMethodToMode = (paymentMethod: string | undefined): 'CASH' | 'UPI' | undefined => {
   if (paymentMethod === 'cash') return 'CASH';
@@ -573,109 +562,30 @@ console.log(` Payment marked ${upperStatus} for booking ${id} by ${actorRole} ${
 
 export const generatePaymentLink = async (req: any, res: Response) => {
   try {
-    if (!razorpay) {
-      return res.status(500).json({ error: 'Razorpay is not configured on the server.' });
-    }
     const { id } = req.params;
-    const booking = await prisma.booking.findUnique({ where: { id }, include: { user: true } });
-    if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-
-    if (booking.paymentStatus === 'SUCCESS') {
-      return res.status(400).json({ error: 'Payment has already been received for this booking.' });
-    }
-
-const actorRole = req.user.role;
-    const actorId = req.user.id;
-    const isAdminLevel = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST'].includes(actorRole);
-    if (booking.collectionMode === 'LAB' && !isAdminLevel) {
-      return res.status(403).json({ error: 'Only Admin/Pathologist can generate payment QR for Lab Visit bookings.' });
-    }
-    if (booking.collectionMode === 'HOME') {
-      const isAssignedExecutive = actorRole === 'EXECUTIVE' && booking.assignedExecutiveId === actorId;
-      if (!isAssignedExecutive && !isAdminLevel) {
-        return res.status(403).json({ error: 'Only the assigned Executive or Admin can generate payment QR for Home Collection bookings.' });
-      }
-    }
-
-    const link = await razorpay.paymentLink.create({
-      amount: Math.round(Number(booking.totalPaid) * 100),
-      currency: 'INR',
-      description: `MedsSeva Booking #${booking.id.substring(0, 8).toUpperCase()}`,
-      customer: {
-        name: booking.patientName,
-        contact: booking.user.mobile,
-      },
-      notify: { sms: false, email: false },
-    });
-
-    await prisma.booking.update({
-      where: { id },
-      data: { paymentLinkId: link.id, paymentLinkUrl: link.short_url },
-    });
-
-    res.json({ paymentLinkId: link.id, paymentLinkUrl: link.short_url });
+    const { createRazorpayOrder: createOrder } = await import('../controllers/financeController');
+    req.body = { bookingId: id };
+    return createOrder(req, res);
   } catch (error: any) {
-    console.error('Failed to generate payment link:', error);
-    res.status(500).json({ error: 'Failed to generate payment QR', details: error.message });
+    res.status(500).json({ error: 'Failed to initiate payment', details: error.message });
   }
 };
-
 export const checkPaymentLinkStatus = async (req: any, res: Response) => {
   try {
-    if (!razorpay) {
-      return res.status(500).json({ error: 'Razorpay is not configured on the server.' });
-    }
     const { id } = req.params;
     const booking = await prisma.booking.findUnique({ where: { id } });
     if (!booking) return res.status(404).json({ error: 'Booking not found.' });
-    if (!booking.paymentLinkId) {
-      return res.status(400).json({ error: 'No payment QR has been generated for this booking yet.' });
-    }
 
     if (booking.paymentStatus === 'SUCCESS') {
       return res.json({ paymentStatus: 'SUCCESS', booking });
     }
 
-    const link = await razorpay.paymentLink.fetch(booking.paymentLinkId);
-
-if (link.status === 'paid') {
-      const isLabVisit = booking.collectionMode === 'LAB';
-      const updated = await prisma.booking.update({
-        where: { id },
-        data: {
-          paymentStatus: 'SUCCESS',
-          paymentMode: 'UPI',
-          paymentReceivedAt: new Date(),
-          paymentReceivedById: req.user.id,
-        },
-      });
-
-      await prisma.bookingStatusLog.create({
-        data: {
-          bookingId: id,
-          status: updated.status as any,
-          note: isLabVisit ? 'Payment received at lab counter via QR/UPI' : 'Payment received via payment link',
-          updatedBy: req.user.id,
-        },
-      });
-
-      sendNotificationToUser(
-        booking.userId,
-        'Payment Received',
-        'Your payment has been received. Staff will proceed with sample collection.',
-        'PAYMENT_SUCCESS',
-        { bookingId: id }
-      ).catch(console.error);
-
-      return res.json({ paymentStatus: 'SUCCESS', booking: updated });
-    }
     res.json({ paymentStatus: 'PENDING', booking });
   } catch (error: any) {
-    console.error('Failed to check payment link status:', error);
-    res.status(500).json({ error: 'Failed to verify payment', details: error.message });
+    console.error('Failed to check payment status:', error);
+    res.status(500).json({ error: 'Failed to check payment status', details: error.message });
   }
 };
-
 export const collectSample = async (req: any, res: Response) => {
   try {
     const { id } = req.params;

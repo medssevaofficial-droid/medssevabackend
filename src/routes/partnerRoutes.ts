@@ -10,9 +10,15 @@ import {
   collectCash,
   initiateUpiCollection,
   checkUpiPaymentStatus,
+  verifyUpiPayment,
   toggleAvailability,
   getPartnerProfile,
   getPartnerStats,
+  updatePartnerProfile,
+  getPartnerAvailability,
+  updateAvailabilitySchedule,
+  getPartnerBranch,
+  getPartnerRatings,
 } from '../controllers/partnerController';
 
 const router = Router();
@@ -28,9 +34,43 @@ router.patch('/bookings/:id/status', updateBookingStatus);
 router.post('/bookings/:id/collect-cash', collectCash);
 router.post('/bookings/:id/collect-upi', initiateUpiCollection);
 router.get('/bookings/:id/upi-status', checkUpiPaymentStatus);
+router.post('/bookings/:id/verify-upi', verifyUpiPayment);
 router.patch('/availability', toggleAvailability);
 router.get('/history', getPartnerHistory);
 router.get('/profile', getPartnerProfile);
 router.get('/stats', getPartnerStats);
+router.patch('/profile', updatePartnerProfile);
+router.get('/availability/schedule', getPartnerAvailability);
+router.patch('/availability/schedule', updateAvailabilitySchedule);
+router.get('/branch', getPartnerBranch);
+router.get('/ratings', getPartnerRatings);
+
+import bcrypt from 'bcryptjs';
+import { prisma } from '../lib/prisma';
+
+router.post('/change-password', async (req: any, res: any) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current and new password are required.' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user || !user.password) {
+      return res.status(400).json({ error: 'No password set for this account.' });
+    }
+    const valid = await bcrypt.compare(currentPassword, user.password);
+    if (!valid) {
+      return res.status(401).json({ error: 'Current password is incorrect.' });
+    }
+    const hashed = await bcrypt.hash(newPassword, 12);
+  await prisma.user.update({ where: { id: req.user.id }, data: { password: hashed } });
+    res.json({ message: 'Password changed successfully.' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to change password', details: error.message });
+  }
+});
 
 export default router;

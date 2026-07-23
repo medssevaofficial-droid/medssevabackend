@@ -1,8 +1,7 @@
-import { PrismaClient, NotificationType, NotificationStatus } from '@prisma/client';
+import { NotificationType, NotificationStatus } from '@prisma/client';
 import { google } from 'googleapis';
 import axios from 'axios';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 const CHANNEL_MAP: Record<NotificationType, string> = {
   BOOKING_CREATED: 'bookings',
@@ -80,7 +79,13 @@ const getDeepLink = (type: NotificationType, data?: Record<string, any>): string
   }
 };
 
+let cachedToken: string | null = null;
+let tokenExpiry: number = 0;
+
 const getAccessToken = async (): Promise<string> => {
+  if (cachedToken && Date.now() < tokenExpiry - 60000) {
+    return cachedToken;
+  }
   const auth = new google.auth.GoogleAuth({
     credentials: {
       project_id: process.env.FIREBASE_PROJECT_ID,
@@ -89,9 +94,11 @@ const getAccessToken = async (): Promise<string> => {
     },
     scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
   });
-  const client = await auth.getClient();
+const client = await auth.getClient();
   const tokenResponse = await client.getAccessToken();
-  return tokenResponse.token as string;
+  cachedToken = tokenResponse.token as string;
+  tokenExpiry = Date.now() + 3600000;
+  return cachedToken;
 };
 const sendFcmToToken = async (
   fcmToken: string,

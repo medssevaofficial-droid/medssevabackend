@@ -8,6 +8,7 @@ import testRoutes from './routes/testRoutes';
 import userRoutes from './routes/userRoutes';
 import cityRoutes from './routes/cityRoutes';
 import paymentMethodRoutes from './routes/paymentMethodRoutes';
+import upiMethodRoutes from './routes/upiMethodRoutes';
 import packageRoutes from './routes/packageRoutes';
 import reportRoutes from './routes/reportRoutes';
 import roleRoutes from './routes/roleRoutes';
@@ -40,7 +41,6 @@ const parseRawBody = (req: any, res: any, next: any) => {
   req.body = JSON.parse(req.rawBody);
   next();
 };
-app.use('/api/bookings/webhook/razorpay', rawBodyMiddleware, parseRawBody);
 app.use('/api/finance/webhook/razorpay', rawBodyMiddleware, parseRawBody);
 
 app.use(express.json());
@@ -57,6 +57,7 @@ app.use('/api/tests', testRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/cities', cityRoutes);
 app.use('/api/payment-methods', paymentMethodRoutes);
+app.use('/api/upi-methods', upiMethodRoutes);
 app.use('/api/packages', packageRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/roles', roleRoutes);

@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '../lib/prisma';
 import { io } from '../server';
 import { createAuditLog } from '../services/audit.service';
 
-const prisma = new PrismaClient();
+
 
 const generateAccessionNumber = async (branchId?: string): Promise<string> => {
   const branch = branchId

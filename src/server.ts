@@ -1,12 +1,10 @@
 import http from 'http';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import app from './app';
 import { registerChatHandlers } from './socket/chatHandlers';
 import os from 'os';
-
-const prisma = new PrismaClient();
+import { prisma } from './lib/prisma';
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 

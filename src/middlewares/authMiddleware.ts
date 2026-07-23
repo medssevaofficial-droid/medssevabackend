@@ -1,8 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-medsseva-key';
 
 export interface AuthRequest extends Request {
@@ -22,11 +20,15 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
 
   const token = authHeader.split(' ')[1];
 
-  try {
+try {
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string; role?: string };
     req.user = { id: decoded.id, role: decoded.role, permissions: [] };
 
-    // Load RBAC permissions for admin users
+    const adminRoles = ['ADMIN', 'SUPER_ADMIN', 'PATHOLOGIST', 'LAB_DEPARTMENT'];
+    if (!decoded.role || !adminRoles.includes(decoded.role)) {
+      return next();
+    }
+
     const adminUser = await prisma.adminUser.findUnique({
       where: { userId: decoded.id },
       include: {

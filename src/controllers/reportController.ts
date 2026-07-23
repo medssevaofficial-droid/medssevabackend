@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest } from '../middlewares/authMiddleware';
 import { autoConsumeForTest } from './inventoryController';
 import { sendNotificationToUser } from '../services/notification.service';
-
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 export const getBookingsForReport = async (req: AuthRequest, res: Response) => {
   try {

@@ -2,7 +2,13 @@ import { Server, Socket } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import Groq from 'groq-sdk';
 import { sendNotificationToUser } from '../services/notification.service';
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
+let groqClient: Groq | null = null;
+function getGroq(): Groq {
+  if (!groqClient) {
+    groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
+  }
+  return groqClient;
+}
 
 async function fetchLiveContext(userMessage: string, prisma: PrismaClient): Promise<string> {
   const lower = userMessage.toLowerCase();
@@ -199,7 +205,7 @@ Escalation rules (CRITICAL):
       { role: 'user', content: userMessage },
     ];
 
-    const response = await groq.chat.completions.create({
+   const response = await getGroq().chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages,
       max_tokens: 500,

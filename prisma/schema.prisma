@@ -17,11 +17,16 @@ model User {
   role                Role            @default(USER)
   avatarUrl           String?
   healthScore         Int             @default(0)
+  dob                 String?
+  gender              String?
+  bloodGroup          String?
+  altMobile           String?
   createdAt           DateTime        @default(now())
   addresses           Address[]
   bookings            Booking[]
   familyMembers       Family[]
-  paymentMethods      PaymentMethod[]
+paymentMethods      PaymentMethod[]
+  upiMethods          UpiMethod[]
 verifiedReports     Report[]        @relation("ReportVerifier")
   paymentsReceived    Booking[]       @relation("PaymentReceiver")
   assignedCollections Booking[]       @relation("AssignedExecutive")
@@ -57,11 +62,20 @@ model Address {
 model PaymentMethod {
   id        String   @id @default(uuid())
   userId    String
-  bank      String
+  cardBrand String
   last4     String
   holder    String
   expiry    String
-  type      String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+model UpiMethod {
+  id        String   @id @default(uuid())
+  userId    String
+  upiId     String
+  provider  String
+  isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
 }
@@ -494,7 +508,8 @@ model PathologyPartner {
   longitude      Float?
   approvalStatus PartnerApprovalStatus @default(PENDING)
   rejectionReason String?
-  isAvailable    Boolean               @default(false)
+isAvailable    Boolean               @default(false)
+  availability   Json?
   rating         Float                 @default(0)
   totalCollections Int                 @default(0)
   createdAt      DateTime              @default(now())
